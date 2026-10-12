@@ -67,7 +67,12 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
 
   const subtotal = selectedProjects.reduce((acc, p) => acc + p.price, 0)
   const taxAmount = (subtotal * taxPercent) / 100
-  const totalAmount = subtotal + taxAmount - discountAmount
+  /* Diskon dibatasi pada subtotal + pajak. Sebelumnya hanya dijaga >= 0,
+     sehingga diskon yang lebih besar dari tagihan menghasilkan total NEGATIF
+     yang tercetak sebagai "-Rp ..." di PDF. */
+  const maxDiscount = subtotal + taxAmount
+  const safeDiscount = Math.min(Math.max(0, discountAmount), maxDiscount)
+  const totalAmount = subtotal + taxAmount - safeDiscount
 
   const getCategoryName = (catId: string) => {
     const found = categories.find((c) => c.id === catId)
@@ -117,21 +122,32 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
       const pageWidth = 210
       const pageHeight = 297
-      const margin = 10
-      const imgWidth = pageWidth - margin * 2
-      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      const pageMargin = 10
+      const imgWidth = pageWidth - pageMargin * 2
+      // Tinggi gambar saat diskalakan ke lebar area cetak
+      const scaledHeight = (canvas.height * imgWidth) / canvas.width
 
-      // add image on first page (position=0 means image starts at top of page)
-      pdf.addImage(imgData, "PNG", margin, 0, imgWidth, imgHeight, "invoice", "FAST")
+      /* Pemotongan multi-halaman.
+       *
+       * Versi lama menambahkan gambar penuh lalu hanya digeser dengan
+       * `position = -pageHeight` setiap halaman, sehingga geometri halaman
+       * pertama (mulai y=0) tidak sinkron dengan halaman berikutnya dan isi di
+       * sekitar batas halaman bisa hilang/terpotong. Di sini setiap halaman
+       * digambar pada offset yang kelipatan tinggi halaman, sehingga
+       * sambungannya tepat. */
+      let renderedHeight = 0
+      let pageIndex = 0
 
-      let heightLeft = imgHeight - pageHeight
-      let position = -pageHeight
-
-      while (heightLeft > 0.1) {
-        pdf.addPage()
-        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight, "invoice", "FAST")
-        position -= pageHeight
-        heightLeft -= pageHeight
+      while (renderedHeight < scaledHeight - 0.5) {
+        if (pageIndex > 0) pdf.addPage()
+        const yOffset = -renderedHeight
+        pdf.addImage(
+          imgData, "PNG", pageMargin, yOffset, imgWidth, scaledHeight,
+          undefined, "FAST",
+        )
+        renderedHeight += pageHeight
+        pageIndex += 1
+        if (pageIndex > 20) break // pengaman terhadap loop tak terbatas
       }
 
       setProgress(95)
@@ -270,10 +286,16 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                 </div>
 
                 {/* Discount */}
+                {/* Diskon */}
                 <div className="space-y-1">
                   <label className="block text-[9.5px] font-medium text-neutral-500 dark:text-neutral-400">Diskon (Rp)</label>
                   <input type="number" value={discountAmount || ""} onChange={(e) => setDiscountAmount(Math.max(0, Number(e.target.value)) || 0)} min="0"
                     className="w-full bg-white dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-right text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all" />
+                  {discountAmount > maxDiscount && (
+                    <p className="text-[9.5px] text-amber-600 dark:text-amber-400 leading-snug">
+                      Diskon dibatasi {formatCurrency(maxDiscount)} supaya total tidak negatif.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -289,10 +311,10 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                     <span className="font-mono font-medium">+{formatCurrency(taxAmount)}</span>
                   </div>
                 )}
-                {discountAmount > 0 && (
+                {safeDiscount > 0 && (
                   <div className="flex justify-between text-[10px] text-red-500">
                     <span>Diskon</span>
-                    <span className="font-mono font-medium">-{formatCurrency(discountAmount)}</span>
+                    <span className="font-mono font-medium">-{formatCurrency(safeDiscount)}</span>
                   </div>
                 )}
                 <div className="border-t border-neutral-200 dark:border-neutral-800 pt-1.5 mt-1.5" />
@@ -385,10 +407,10 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                 <div style={{ textAlign: "right", fontSize: "7.5pt" }}>
                   <div style={{ fontSize: "6.5pt", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", color: "#aaa", marginBottom: "8px" }}>Tanggal</div>
                   <div style={{ color: "#666", marginBottom: "2px" }}>
-                    Terbit: <span style={{ fontWeight: 600, color: "#444", fontFamily: "'JetBrains Mono', monospace" }}>{issueDate}</span>
+                    Terbit: <span style={{ fontWeight: 600, color: "#444", fontFamily: "'JetBrains Mono', monospace" }}>{formatDate(issueDate)}</span>
                   </div>
                   <div style={{ color: "#666" }}>
-                    Jatuh Tempo: <span style={{ fontWeight: 600, color: "#444", fontFamily: "'JetBrains Mono', monospace" }}>{dueDate}</span>
+                    Jatuh Tempo: <span style={{ fontWeight: 600, color: "#444", fontFamily: "'JetBrains Mono', monospace" }}>{formatDate(dueDate)}</span>
                   </div>
                 </div>
               </div>
@@ -445,10 +467,10 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500, color: "#2e7d32" }}>+{formatCurrency(taxAmount)}</span>
                     </div>
                   )}
-                  {discountAmount > 0 && (
+                  {safeDiscount > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: "8.5pt", color: "#c62828" }}>
                       <span>Diskon</span>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500 }}>-{formatCurrency(discountAmount)}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500 }}>-{formatCurrency(safeDiscount)}</span>
                     </div>
                   )}
                   <div style={{ borderTop: "2px solid #1a1a2e", margin: "6px 0 4px" }} />

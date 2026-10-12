@@ -2,12 +2,17 @@
 
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react"
 import type { Project, Category, ProjectFormData, ProjectStatus } from "@/types"
-import { X, Upload, FileImage } from "lucide-react"
+import { X, Upload, FileImage, AlertTriangle, Loader2 } from "lucide-react"
+import {
+  compressImage, isAcceptedImage, formatBytes, dataUrlBytes,
+  MAX_UPLOAD_BYTES,
+} from "@/lib/image"
 
 interface ProjectFormProps {
   isOpen: boolean
   onClose: () => void
-  onSave: (data: ProjectFormData) => void
+  /** Mengembalikan true bila berhasil. Modal hanya menutup saat true. */
+  onSave: (data: ProjectFormData) => Promise<boolean>
   projectToEdit?: Project | null
   categories: Category[]
 }
@@ -29,7 +34,10 @@ export default function ProjectForm({ isOpen, onClose, onSave, projectToEdit, ca
   const [notes, setNotes] = useState("")
   const [previewImage, setPreviewImage] = useState("")
   const [imageError, setImageError] = useState("")
+  const [imageMeta, setImageMeta] = useState("")
+  const [compressing, setCompressing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState("")
 
   useEffect(() => {
     if (projectToEdit) {
@@ -52,33 +60,70 @@ export default function ProjectForm({ isOpen, onClose, onSave, projectToEdit, ca
       setPreviewImage("")
     }
     setImageError("")
+    setImageMeta("")
+    setFormError("")
   }, [projectToEdit, isOpen, categories])
 
   if (!isOpen) return null
 
-  const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
     setImageError("")
-    const file = e.target.files?.[0]
+    const input = e.target
+    const file = input.files?.[0]
     if (!file) return
-    if (!["image/jpeg", "image/png", "image/jpg"].includes(file.type)) {
-      setImageError("Format harus JPG atau PNG.")
+
+    if (!isAcceptedImage(file)) {
+      setImageError("Format harus JPG, PNG, atau WebP.")
+      input.value = ""
       return
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setImageError("Maksimal 5MB.")
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setImageError(`Maksimal ${formatBytes(MAX_UPLOAD_BYTES)}.`)
+      input.value = ""
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => { if (typeof reader.result === "string") setPreviewImage(reader.result) }
-    reader.readAsDataURL(file)
+
+    setCompressing(true)
+    try {
+      // Diperkecil di peramban: yang tersimpan cukup ringan untuk dikirim
+      // bersama setiap pemuatan data, tanpa perlu storage terpisah.
+      const compressed = await compressImage(file)
+      setPreviewImage(compressed)
+      setImageMeta(`${formatBytes(file.size)} → ${formatBytes(dataUrlBytes(compressed))}`)
+    } catch {
+      // Peramban lama / kanvas tidak tersedia -> pakai berkas aslinya,
+      // tetapi tetap beri tahu bahwa ukurannya besar.
+      const reader = new FileReader()
+      reader.onerror = () => setImageError("Gagal membaca berkas. Coba gambar lain.")
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setPreviewImage(reader.result)
+          setImageMeta(`asli ${formatBytes(file.size)} (tidak terkompresi)`)
+          if (file.size > 500 * 1024) {
+            setImageError("Gambar tidak bisa dikompres di peramban ini, jadi ukurannya besar. Pakai gambar yang lebih kecil bila memungkinkan.")
+          }
+        }
+      }
+      reader.readAsDataURL(file)
+    } finally {
+      setCompressing(false)
+    }
   }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!clientName.trim() || !projectTitle.trim() || price === "" || !deadline) return
+    setFormError("")
+    if (!clientName.trim() || !projectTitle.trim() || price === "" || !deadline) {
+      setFormError("Lengkapi dulu kolom bertanda *.")
+      return
+    }
+    if (!categoryId) {
+      setFormError("Pilih kategori dulu. Kalau kosong, tambahkan kategori di tab Kategori.")
+      return
+    }
     setSaving(true)
     try {
-      await onSave({
+      const success = await onSave({
         clientName: clientName.trim(),
         projectTitle: projectTitle.trim(),
         categoryId,
@@ -88,7 +133,9 @@ export default function ProjectForm({ isOpen, onClose, onSave, projectToEdit, ca
         notes: notes.trim(),
         previewImage: previewImage || undefined,
       })
-      onClose()
+      // Hanya tutup bila benar-benar tersimpan; kalau gagal, isian tetap di sini
+      // supaya tidak perlu diketik ulang.
+      if (success) onClose()
     } finally {
       setSaving(false)
     }
@@ -164,24 +211,33 @@ export default function ProjectForm({ isOpen, onClose, onSave, projectToEdit, ca
             <span className="block text-[9px] uppercase font-medium tracking-[0.15em] text-neutral-400 dark:text-neutral-500">Gambar (Opsional)</span>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center">
               <div className="relative border border-dashed border-neutral-200 dark:border-neutral-850 bg-neutral-50/20 dark:bg-[#121214]/15 hover:bg-neutral-100/60 dark:hover:bg-neutral-900/30 rounded-lg p-6 text-center transition-all cursor-pointer">
-                <input type="file" accept="image/png, image/jpeg, image/jpg" onChange={handleImageChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                <input type="file" accept="image/png, image/jpeg, image/jpg, image/webp" onChange={handleImageChange} disabled={compressing} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-wait" />
                 <div className="space-y-2.5">
                   <div className="mx-auto w-8 h-8 rounded-md bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-850 flex items-center justify-center text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors shadow-xs">
-                    <Upload className="w-3.5 h-3.5" />
+                    {compressing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
                   </div>
                   <div>
-                    <span className="text-xs font-semibold text-neutral-750 dark:text-neutral-300 block">Unggah Gambar</span>
-                    <span className="text-[10px] text-neutral-450 dark:text-neutral-500 block mt-0.5">JPG/PNG, maks 5MB</span>
+                    <span className="text-xs font-semibold text-neutral-750 dark:text-neutral-300 block">
+                      {compressing ? "Memperkecil gambar..." : "Unggah Gambar"}
+                    </span>
+                    <span className="text-[10px] text-neutral-450 dark:text-neutral-500 block mt-0.5">JPG/PNG/WebP, maks 5MB</span>
                   </div>
                 </div>
               </div>
               <div className="flex items-center justify-center">
                 {previewImage ? (
                   <div className="relative border border-neutral-150 dark:border-neutral-900 bg-neutral-55 dark:bg-neutral-950 rounded-lg p-3 w-full flex flex-col items-center">
+                    {/* next/image tidak dipakai di sini: sumbernya data URL hasil
+                        kompresi di peramban (lib/image.ts), dan next/image tidak
+                        bisa mengoptimalkan data URL — hanya menambah lapisan
+                        pembungkus tanpa manfaat. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={previewImage} alt="Pratinjau" className="max-h-24 w-auto rounded object-contain border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xs" />
-                    <div className="mt-2.5 flex items-center justify-between w-full">
-                      <span className="text-[9px] font-mono text-neutral-400 dark:text-neutral-500 uppercase tracking-widest truncate max-w-[150px]">Gambar</span>
-                      <button type="button" onClick={() => setPreviewImage("")} className="text-[10px] text-red-500 hover:text-red-700 font-medium cursor-pointer">Hapus</button>
+                    <div className="mt-2.5 flex items-center justify-between w-full gap-2">
+                      <span className="text-[9px] font-mono text-neutral-400 dark:text-neutral-500 uppercase tracking-widest truncate" title={imageMeta || undefined}>
+                        {imageMeta || "Gambar"}
+                      </span>
+                      <button type="button" onClick={() => { setPreviewImage(""); setImageMeta(""); setImageError("") }} className="text-[10px] text-red-500 hover:text-red-700 font-medium cursor-pointer shrink-0">Hapus</button>
                     </div>
                   </div>
                 ) : (
@@ -195,11 +251,23 @@ export default function ProjectForm({ isOpen, onClose, onSave, projectToEdit, ca
             {imageError && <p className="text-[11px] text-red-500 font-medium">{imageError}</p>}
           </div>
 
+          {categories.length === 0 && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+              Belum ada kategori. Tambahkan dulu di tab Kategori sebelum menyimpan proyek.
+            </p>
+          )}
+
+          {formError && (
+            <p className="text-[11px] text-red-500 font-medium bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />{formError}
+            </p>
+          )}
+
           <div className="border-t border-neutral-100 dark:border-neutral-900/60 pt-6 flex items-center justify-end gap-3">
-            <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 border border-neutral-200 dark:border-neutral-850 text-neutral-500 dark:text-neutral-400 rounded-lg hover:bg-neutral-50 hover:text-neutral-850 dark:hover:text-neutral-100 dark:hover:bg-neutral-900 transition-all text-xs font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Batal</button>
-            <button type="submit" disabled={saving} className="px-5 py-2 bg-neutral-950 dark:bg-neutral-50 text-white dark:text-neutral-950 font-semibold rounded-lg hover:opacity-90 transition-all text-xs cursor-pointer shadow-xs active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
-              {saving ? (
-                <><span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />{projectToEdit ? "Menyimpan..." : "Menambah..."}</>
+            <button type="button" onClick={onClose} disabled={saving || compressing} className="px-4 py-2 border border-neutral-200 dark:border-neutral-850 text-neutral-500 dark:text-neutral-400 rounded-lg hover:bg-neutral-50 hover:text-neutral-850 dark:hover:text-neutral-100 dark:hover:bg-neutral-900 transition-all text-xs font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Batal</button>
+            <button type="submit" disabled={saving || compressing || categories.length === 0} className="px-5 py-2 bg-neutral-950 dark:bg-neutral-50 text-white dark:text-neutral-950 font-semibold rounded-lg hover:opacity-90 transition-all text-xs cursor-pointer shadow-xs active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+              {saving || compressing ? (
+                <><span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />{compressing ? "Memproses gambar..." : projectToEdit ? "Menyimpan..." : "Menambah..."}</>
               ) : (
                 projectToEdit ? "Simpan" : "Tambah Proyek"
               )}

@@ -1,25 +1,51 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { Project, Category, Tab, ProjectFormData, ProjectStatus, DashboardStats } from "@/types"
-import { getProjects, createProject, updateProject, deleteProject, updateProjectStatus } from "@/actions/projects"
-import { getCategories } from "@/actions/categories"
+import dynamic from "next/dynamic"
+import type { Project, Category, Tab, ProjectFormData, ProjectStatus, DashboardPayload } from "@/types"
+import {
+  getDashboardData, createProject, updateProject, deleteProject, updateProjectStatus,
+} from "@/actions/projects"
 import Sidebar from "@/components/layout/Sidebar"
 import StatsGrid from "@/components/dashboard/StatsGrid"
-import AnalyticsSection from "@/components/dashboard/AnalyticsSection"
 import ProjectList from "@/components/projects/ProjectList"
-import ProjectForm from "@/components/projects/ProjectForm"
 import ConfirmModal from "@/components/projects/ConfirmModal"
-import CategoryManager from "@/components/categories/CategoryManager"
 import Toast, { type ToastType } from "@/components/ui/Toast"
 import ErrorBoundary from "@/components/ErrorBoundary"
 import { PlusCircle, RefreshCw, Sun, Moon, Columns } from "lucide-react"
 
+/* Tab yang tidak terlihat tidak perlu ikut di bundel awal. */
+const AnalyticsSection = dynamic(() => import("@/components/dashboard/AnalyticsSection"), {
+  loading: () => <TabSkeleton />,
+})
+const CategoryManager = dynamic(() => import("@/components/categories/CategoryManager"), {
+  loading: () => <TabSkeleton />,
+})
+const ProjectForm = dynamic(() => import("@/components/projects/ProjectForm"), {
+  ssr: false,
+})
+
+function TabSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-6 w-40 bg-neutral-100 dark:bg-neutral-900 rounded" />
+      <div className="h-48 bg-neutral-100/70 dark:bg-neutral-900/50 rounded-xl" />
+      <div className="h-32 bg-neutral-100/50 dark:bg-neutral-900/30 rounded-xl" />
+    </div>
+  )
+}
+
+const EMPTY_STATS = {
+  total: 0, onProgress: 0, revisi: 0, done: 0, cancel: 0,
+  totalIncome: 0, pipelineIncome: 0, overdue: 0,
+}
+
+const POLL_INTERVAL_MS = 30_000
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [stats, setStats] = useState<DashboardStats>({ total: 0, onProgress: 0, revisi: 0, done: 0, cancel: 0, totalIncome: 0, pipelineIncome: 0 })
+  const [stats, setStats] = useState(EMPTY_STATS)
   const [activeTab, setActiveTab] = useState<Tab>("dashboard")
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
@@ -29,121 +55,175 @@ export default function Home() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [toast, setToast] = useState<{ message: string; type?: ToastType } | null>(null)
   const [loading, setLoading] = useState(true)
-  const [lastSync, setLastSync] = useState<string>("")
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [lastSync, setLastSync] = useState("")
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Dibaca di dalam interval tanpa menjadikannya dependency -> interval tidak
+  // ikut dibongkar-pasang setiap kali modal dibuka/ditutup.
+  const uiBusyRef = useRef(false)
+  useEffect(() => { uiBusyRef.current = isModalOpen || isConfirmOpen }, [isModalOpen, isConfirmOpen])
+
+  /* ---------------------------------------------------------------- tema --- */
   useEffect(() => {
     const saved = localStorage.getItem("theme")
     if (saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
       setDarkMode(true)
-      document.documentElement.classList.add("dark")
     }
   }, [])
 
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add("dark")
-      localStorage.setItem("theme", "dark")
-    } else {
-      document.documentElement.classList.remove("dark")
-      localStorage.setItem("theme", "light")
-    }
+    document.documentElement.classList.toggle("dark", darkMode)
+    localStorage.setItem("theme", darkMode ? "dark" : "light")
   }, [darkMode])
 
-  const triggerToast = (message: string, type: ToastType = "success") => setToast({ message, type })
+  const triggerToast = useCallback((message: string, type: ToastType = "success") => {
+    setToast({ message, type })
+  }, [])
 
-  const computeStats = useCallback((projects: Project[]): DashboardStats => ({
-    total: projects.length,
-    onProgress: projects.filter((p) => p.status === "On Progress").length,
-    revisi: projects.filter((p) => p.status === "Revisi").length,
-    done: projects.filter((p) => p.status === "Done").length,
-    cancel: projects.filter((p) => p.status === "Cancel").length,
-    totalIncome: projects.filter((p) => p.status === "Done").reduce((sum, p) => sum + p.price, 0),
-    pipelineIncome: projects.filter((p) => p.status === "On Progress" || p.status === "Revisi").reduce((sum, p) => sum + p.price, 0),
-  }), [])
+  /* ------------------------------------------------------- pemuatan data --- */
+  /**
+   * Sumber kebenaran tunggal.
+   *
+   * Sebelumnya: revalidatePath("/") dipanggil di setiap action, tetapi halaman
+   * ini "use client" dan datanya ada di useState — invalidation Router Cache
+   * tidak bisa menyentuh useState, jadi hasilnya tidak pernah terpakai dan
+   * App mengandalkan poll 15 detik untuk me-refresh. Sekarang action yang
+   * mengembalikan data, dan satu fungsi ini yang memasangnya.
+   */
+  const applyPayload = useCallback((payload: DashboardPayload) => {
+    setProjects(payload.projects)
+    setCategories(payload.categories)
+    setStats(payload.stats)
+    setLoadError(null)
+    setLastSync(new Date().toLocaleTimeString("id-ID", {
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }))
+  }, [])
 
-  const loadData = useCallback(async (showLoader = false) => {
+  const loadData = useCallback(async (opts?: { showLoader?: boolean; silent?: boolean }) => {
+    const { showLoader = false, silent = false } = opts ?? {}
     if (showLoader) setLoading(true)
-    try {
-      const [p, c] = await Promise.all([getProjects(), getCategories()])
-      setProjects(p)
-      setCategories(c)
-      setStats(computeStats(p))
-      setLastSync(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }))
-    } catch (err) {
-      console.error("Failed to load data:", err)
-    } finally {
-      setLoading(false)
+    const res = await getDashboardData()
+    if (res.ok) {
+      applyPayload(res.data)
+    } else if (!silent) {
+      setLoadError(res.error)
     }
-  }, [computeStats])
+    if (showLoader) setLoading(false)
+  }, [applyPayload])
 
-  useEffect(() => { loadData(true) }, [loadData])
+  useEffect(() => { loadData({ showLoader: true }) }, [loadData])
 
+  // Muat data terakhir saat tab kembali aktif, lalu jadwalkan poll berikutnya
+  // dari titik itu (bukan dari selang tetap yang jalan terus).
   useEffect(() => {
-    intervalRef.current = setInterval(() => loadData(), 15000)
+    const schedule = () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      intervalRef.current = setInterval(() => {
+        if (document.hidden || uiBusyRef.current) return
+        void loadData({ silent: true })
+      }, POLL_INTERVAL_MS)
+    }
 
     const onVisibility = () => {
       if (document.hidden) {
         if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
       } else {
-        if (!intervalRef.current) { loadData(); intervalRef.current = setInterval(() => loadData(), 15000) }
+        // data pasti basi setelah tab disembunyikan -> segarkan diam-diam
+        void loadData({ silent: true })
+        schedule()
       }
     }
-    document.addEventListener("visibilitychange", onVisibility)
 
+    schedule()
+    document.addEventListener("visibilitychange", onVisibility)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
       document.removeEventListener("visibilitychange", onVisibility)
     }
   }, [loadData])
 
-  const handleSaveProject = async (data: ProjectFormData) => {
-    try {
-      if (projectToEdit) {
-        await updateProject(projectToEdit.id, data)
-        triggerToast("Proyek berhasil diperbarui!")
-      } else {
-        await createProject(data)
-        triggerToast("Proyek berhasil ditambahkan!")
+  /* ------------------------------------------------------------- mutasi --- */
+
+  const handleSaveProject = useCallback(async (data: ProjectFormData): Promise<boolean> => {
+    const res = projectToEdit
+      ? await updateProject(projectToEdit.id, data)
+      : await createProject(data)
+
+    if (!res.ok) {
+      triggerToast(res.error, "warning")
+      return false // biarkan modal tetap terbuka supaya isian tidak hilang
+    }
+    triggerToast(projectToEdit ? "Proyek berhasil diperbarui!" : "Proyek berhasil ditambahkan!")
+    setProjectToEdit(null)
+    void loadData({ silent: true })
+    return true
+  }, [projectToEdit, triggerToast, loadData])
+
+  const handleStatusChange = useCallback(async (id: string, status: ProjectStatus) => {
+    /* Optimistis: ubah di layar dulu, kembalikan bila gagal.
+       Rollback sengaja hanya menyentuh SATU proyek (bukan menimpa seluruh
+       array dengan snapshot lama) — kalau tidak, perubahan status lain yang
+       berhasil di sela-sela akan ikut terhapus. */
+    let previousStatus: ProjectStatus | undefined
+    setProjects((prev) => prev.map((p) => {
+      if (p.id !== id) return p
+      previousStatus = p.status
+      return { ...p, status }
+    }))
+    const res = await updateProjectStatus(id, status)
+    if (!res.ok) {
+      if (previousStatus !== undefined) {
+        setProjects((prev) => prev.map((p) =>
+          p.id === id ? { ...p, status: previousStatus as ProjectStatus } : p,
+        ))
       }
-      setProjectToEdit(null)
-      await loadData()
-    } catch {
-      triggerToast("Gagal simpan proyek.", "warning")
+      triggerToast(res.error, "warning")
+      return
     }
-  }
+    triggerToast(`Status diganti jadi ${status}.`)
+    void loadData({ silent: true })
+  }, [triggerToast, loadData])
 
-  const handleStatusChange = async (id: string, status: ProjectStatus) => {
-    try {
-      await updateProjectStatus(id, status)
-      triggerToast(`Status diganti jadi ${status}.`)
-      await loadData()
-    } catch {
-      triggerToast("Gagal ubah status.", "warning")
-    }
-  }
+  const handleEditClick = useCallback((project: Project) => {
+    setProjectToEdit(project)
+    setIsModalOpen(true)
+  }, [])
 
-  const handleDeleteClick = (project: Project) => { setProjectToDelete(project); setIsConfirmOpen(true) }
-  const handleEditClick = (project: Project) => { setProjectToEdit(project); setIsModalOpen(true) }
+  const handleDeleteClick = useCallback((project: Project) => {
+    setProjectToDelete(project)
+    setIsConfirmOpen(true)
+  }, [])
 
-  const handleConfirmDelete = async () => {
-    if (!projectToDelete) return
-    try {
-      await deleteProject(projectToDelete.id)
-      triggerToast(`"${projectToDelete.projectTitle}" berhasil dihapus.`, "warning")
-      await loadData()
-    } catch {
-      triggerToast("Gagal hapus proyek.", "warning")
-    }
+  const closeConfirm = useCallback(() => {
     setIsConfirmOpen(false)
     setProjectToDelete(null)
-  }
+  }, [])
+
+  const handleConfirmDelete = useCallback(async () => {
+    const target = projectToDelete
+    if (!target) return
+    setDeletingId(target.id)
+    const res = await deleteProject(target.id)
+    setDeletingId(null)
+    if (!res.ok) {
+      triggerToast(res.error, "warning")
+      return // modal tetap terbuka agar user bisa mencoba lagi / membatalkan
+    }
+    triggerToast(`"${target.projectTitle}" berhasil dihapus.`, "warning")
+    closeConfirm()
+    void loadData({ silent: true })
+  }, [projectToDelete, triggerToast, closeConfirm, loadData])
+
+  /* ------------------------------------------------------------- render --- */
 
   if (loading) {
     return (
       <div className="min-h-screen bg-[#f5f5f7] dark:bg-[#09090b] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 rounded bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 flex items-center justify-center font-serif italic text-xs font-medium uppercase animate-pulse">ds</div>
+          <div className="w-6 h-6 rounded bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 flex items-center justify-center font-sans italic text-xs font-medium uppercase animate-pulse">ds</div>
           <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono tracking-widest uppercase">Memuat...</span>
         </div>
       </div>
@@ -157,15 +237,17 @@ export default function Home() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
       />
 
       <main className={`flex-1 p-4 sm:p-6 lg:p-8 w-full space-y-6 overflow-y-auto mb-16 md:mb-0 transition-all duration-300 mx-auto ${sidebarOpen ? "max-w-6xl" : "max-w-7xl"}`}>
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 border-b border-neutral-200/30 dark:border-neutral-900 pb-6">
           <div>
-            <div className="flex items-center gap-2" title={`Terakhir sinkron: ${lastSync}`}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[8.5px] text-neutral-400 dark:text-neutral-500 font-mono uppercase tracking-[0.2em] font-medium">Live</span>
+            <div className="flex items-center gap-2" title={lastSync ? `Terakhir sinkron: ${lastSync}` : undefined}>
+              <span className={`w-1.5 h-1.5 rounded-full ${loadError ? "bg-red-500" : "bg-emerald-500 animate-pulse"}`} />
+              <span className="text-[8.5px] text-neutral-400 dark:text-neutral-500 font-mono uppercase tracking-[0.2em] font-medium">
+                {loadError ? "Offline" : "Live"}
+              </span>
               {lastSync && <span className="text-[8px] text-neutral-400/60 dark:text-neutral-600 font-mono">{lastSync}</span>}
             </div>
             <h1 className="text-2xl sm:text-3xl font-light text-neutral-950 dark:text-neutral-50 tracking-tight mt-1.5 flex items-center gap-2">
@@ -179,20 +261,34 @@ export default function Home() {
               {activeTab === "analytics" && <>Laporan <span className="font-serif italic font-normal text-neutral-400 dark:text-neutral-500">Keuangan</span></>}
               {activeTab === "categories" && <>Kategori <span className="font-serif italic font-normal text-neutral-400 dark:text-neutral-500">Layanan</span></>}
             </h1>
+            {stats.overdue > 0 && (activeTab === "dashboard" || activeTab === "projects") && (
+              <p className="text-[10.5px] text-amber-600 dark:text-amber-400 mt-1.5">
+                {stats.overdue} proyek aktif sudah melewati deadline.
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            <button onClick={() => setDarkMode(!darkMode)} className="p-2 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-all cursor-pointer bg-neutral-100/10 hover:bg-neutral-100/30 dark:bg-neutral-900/10 dark:hover:bg-neutral-900/30">
+            <button onClick={() => setDarkMode((v) => !v)} aria-label="Ganti tema" className="p-2 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-all cursor-pointer bg-neutral-100/10 hover:bg-neutral-100/30 dark:bg-neutral-900/10 dark:hover:bg-neutral-900/30">
               {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-neutral-500" />}
             </button>
-            <button onClick={() => loadData()} className="px-3 py-1.5 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-100/30 dark:hover:bg-neutral-900/30">
+            <button onClick={() => loadData({ silent: true })} className="px-3 py-1.5 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-100/30 dark:hover:bg-neutral-900/30">
               <RefreshCw className="w-3 h-3" />Refresh
             </button>
-            <button onClick={() => { setProjectToEdit(null); setIsModalOpen(true) }} className="px-4 py-1.5 bg-neutral-950 dark:bg-neutral-100 hover:bg-neutral-850 dark:hover:bg-white text-white dark:text-neutral-950 font-medium rounded-full text-xs flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-[0.98]">
+            <button onClick={() => { setProjectToEdit(null); setIsModalOpen(true) }} className="px-4 py-1.5 bg-neutral-950 dark:bg-neutral-100 hover:bg-neutral-800 dark:hover:bg-white text-white dark:text-neutral-950 font-medium rounded-full text-xs flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-[0.98]">
               <PlusCircle className="w-3.5 h-3.5" />Baru
             </button>
           </div>
         </header>
+
+        {loadError && (
+          <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg p-3.5">
+            <span className="text-red-500 text-xs font-medium flex-1">{loadError}</span>
+            <button onClick={() => loadData({ showLoader: true })} className="text-[11px] font-semibold text-red-600 dark:text-red-400 hover:underline cursor-pointer shrink-0">
+              Coba lagi
+            </button>
+          </div>
+        )}
 
         <div className="space-y-6 min-h-[50vh] transition-all duration-300">
           {activeTab === "dashboard" && (
@@ -209,7 +305,7 @@ export default function Home() {
                       Lihat Semua &rarr;
                     </button>
                   </div>
-                  <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} isDashboard={true} />
+                  <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} isDashboard />
                 </div>
               </div>
             </div>
@@ -225,9 +321,15 @@ export default function Home() {
             </div>
           )}
 
-          {activeTab === "analytics" && <AnalyticsSection projects={projects} darkMode={darkMode} />}
+          {activeTab === "analytics" && <AnalyticsSection projects={projects} />}
 
-          {activeTab === "categories" && <CategoryManager categories={categories} onChange={loadData} />}
+          {activeTab === "categories" && (
+            <CategoryManager
+              categories={categories}
+              onChanged={() => loadData({ silent: true })}
+              onToast={triggerToast}
+            />
+          )}
         </div>
       </main>
 
@@ -243,8 +345,9 @@ export default function Home() {
         isOpen={isConfirmOpen}
         title="Hapus Proyek"
         projectName={projectToDelete?.projectTitle || ""}
+        busy={deletingId !== null}
         onConfirm={handleConfirmDelete}
-        onCancel={() => { setIsConfirmOpen(false); setProjectToDelete(null) }}
+        onCancel={closeConfirm}
       />
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

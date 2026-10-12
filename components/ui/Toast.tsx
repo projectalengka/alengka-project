@@ -2,8 +2,9 @@
 
 import { useEffect } from "react"
 import { CheckCircle2, AlertTriangle, Info, X } from "lucide-react"
+import type { ToastType } from "@/types"
 
-export type ToastType = "success" | "warning" | "info"
+export type { ToastType }
 
 interface ToastProps {
   message: string

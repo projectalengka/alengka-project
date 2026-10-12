@@ -1,12 +1,45 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { revalidatePath } from "next/cache"
-import type { Project, Category, ProjectFormData, ProjectStatus } from "@/types"
+import { ProjectStatus as PrismaStatus } from "@prisma/client"
+import type {
+  Project, Category, ProjectFormData, ProjectStatus,
+  ActionResult, DashboardPayload,
+} from "@/types"
+import { isProjectStatus } from "@/types"
+import { computeStats } from "@/lib/analytics"
+
+/**
+ * Enum di database memakai penamaan Prisma (On_Progress) karena identifier
+ * enum SQL tidak boleh mengandung spasi, sedangkan UI memakai label manusia
+ * ("On Progress"). Dua fungsi ini adalah satu-satunya tempat penerjemahannya,
+ * supaya tidak ada pemetaan tersebar di banyak file.
+ */
+const PRISMA_STATUS: Record<ProjectStatus, PrismaStatus> = {
+  "On Progress": PrismaStatus.On_Progress,
+  Revisi: PrismaStatus.Revisi,
+  Done: PrismaStatus.Done,
+  Cancel: PrismaStatus.Cancel,
+}
+
+const UI_STATUS: Record<PrismaStatus, ProjectStatus> = {
+  [PrismaStatus.On_Progress]: "On Progress",
+  [PrismaStatus.Revisi]: "Revisi",
+  [PrismaStatus.Done]: "Done",
+  [PrismaStatus.Cancel]: "Cancel",
+}
+
+function toPrismaStatus(status: ProjectStatus): PrismaStatus {
+  return PRISMA_STATUS[status]
+}
+
+function toUiStatus(status: PrismaStatus): ProjectStatus {
+  return UI_STATUS[status] ?? "On Progress"
+}
 
 type PrismaProjectWithCategory = {
   id: string; clientName: string; projectTitle: string; categoryId: string
-  price: number; status: string; deadline: Date; notes: string
+  price: number; status: PrismaStatus; deadline: Date; notes: string
   previewImage: string | null; createdAt: Date; updatedAt: Date
   category: { id: string; name: string; iconName: string }
 }
@@ -19,7 +52,7 @@ function mapProject(p: PrismaProjectWithCategory): Project {
     categoryId: p.categoryId,
     category: p.category as Category,
     price: p.price,
-    status: p.status as ProjectStatus,
+    status: toUiStatus(p.status),
     deadline: p.deadline,
     notes: p.notes,
     previewImage: p.previewImage,
@@ -28,80 +61,192 @@ function mapProject(p: PrismaProjectWithCategory): Project {
   }
 }
 
+const PROJECT_INCLUDE = { category: true } as const
+
+/* -------------------------------------------------------------------------- */
+/* Query                                                                      */
+/* -------------------------------------------------------------------------- */
+
 export async function getProjects(): Promise<Project[]> {
   const projects = await prisma.project.findMany({
-    include: { category: true },
+    include: PROJECT_INCLUDE,
     orderBy: { createdAt: "desc" },
   })
   return projects.map(mapProject)
 }
 
+/**
+ * Satu action untuk seluruh data dashboard.
+ *
+ * Sebelumnya App memanggil getProjects() + getCategories() terpisah (dua round
+ * trip), lalu mengulanginya lagi setelah setiap mutasi karena revalidatePath
+ * tidak berpengaruh pada state komponen klien. Sekarang semuanya lewat satu
+ * pintu, sehingga pemuatan ulang cukup sekali jalan.
+ */
+export async function getDashboardData(): Promise<ActionResult<DashboardPayload>> {
+  try {
+    const [projects, categories] = await Promise.all([
+      getProjects(),
+      prisma.category.findMany({
+        include: { _count: { select: { projects: true } } },
+        orderBy: { name: "asc" },
+      }),
+    ])
+    return {
+      ok: true,
+      data: {
+        projects,
+        categories: categories.map((c) => ({
+          id: c.id, name: c.name, iconName: c.iconName, _count: c._count,
+        })),
+        stats: computeStats(projects),
+      },
+    }
+  } catch (err) {
+    console.error("[getDashboardData]", err)
+    return { ok: false, error: "Gagal memuat data. Coba refresh halaman." }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Validasi                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const MAX_NAME_LENGTH = 120
+const MAX_PRICE = 1_000_000_000_000 // 1 triliun — guard terhadap salah ketik
+const MAX_NOTES_LENGTH = 5000
+
 function validateProject(data: ProjectFormData): string | null {
   if (!data.clientName?.trim()) return "Nama klien harus diisi."
+  if (data.clientName.trim().length > MAX_NAME_LENGTH)
+    return `Nama klien terlalu panjang (maks ${MAX_NAME_LENGTH} karakter).`
   if (!data.projectTitle?.trim()) return "Judul proyek harus diisi."
+  if (data.projectTitle.trim().length > MAX_NAME_LENGTH)
+    return `Judul proyek terlalu panjang (maks ${MAX_NAME_LENGTH} karakter).`
   if (!data.categoryId) return "Kategori harus dipilih."
-  if (typeof data.price !== "number" || data.price < 0) return "Harga tidak valid."
+  if (typeof data.price !== "number" || !Number.isFinite(data.price) || data.price < 0)
+    return "Harga tidak valid."
+  if (data.price > MAX_PRICE) return "Harga terlalu besar. Periksa kembali angka yang dimasukkan."
+  if (!isProjectStatus(data.status))
+    return "Status tidak dikenal. Pilih salah satu: On Progress, Revisi, Done, Cancel."
   if (!data.deadline) return "Deadline harus diisi."
-  if (data.notes && data.notes.length > 5000) return "Catatan terlalu panjang (maks 5000 karakter)."
+  if (Number.isNaN(new Date(data.deadline).getTime())) return "Format deadline tidak valid."
+  if (data.notes && data.notes.length > MAX_NOTES_LENGTH)
+    return `Catatan terlalu panjang (maks ${MAX_NOTES_LENGTH} karakter).`
   return null
 }
 
-export async function createProject(data: ProjectFormData): Promise<Project> {
-  const error = validateProject(data)
-  if (error) throw new Error(error)
-
-  const p = await prisma.project.create({
-    data: {
-      clientName: data.clientName.trim(),
-      projectTitle: data.projectTitle.trim(),
-      categoryId: data.categoryId,
-      price: data.price,
-      status: data.status,
-      deadline: new Date(data.deadline),
-      notes: data.notes?.trim() || "",
-      previewImage: data.previewImage || null,
-    },
-    include: { category: true },
+/**
+ * Pastikan kategori benar-benar ada sebelum insert/update.
+ * Tanpa ini, categoryId yang salah muncul sebagai 500 FK-violation, bukan pesan.
+ * Dijalankan dalam satu query yang juga menghitung jumlah proyek.
+ */
+async function categoryGuard(categoryId: string): Promise<string | null> {
+  const found = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: { id: true },
   })
-  revalidatePath("/")
-  return mapProject(p)
+  return found ? null : "Kategori yang dipilih tidak ditemukan. Muat ulang halaman."
 }
 
-export async function updateProject(id: string, data: ProjectFormData): Promise<Project> {
-  const error = validateProject(data)
-  if (error) throw new Error(error)
-
-  const p = await prisma.project.update({
-    where: { id },
-    data: {
-      clientName: data.clientName.trim(),
-      projectTitle: data.projectTitle.trim(),
-      categoryId: data.categoryId,
-      price: data.price,
-      status: data.status,
-      deadline: new Date(data.deadline),
-      notes: data.notes?.trim() || "",
-      previewImage: data.previewImage || null,
-    },
-    include: { category: true },
-  })
-  revalidatePath("/")
-  return mapProject(p)
+/** Ubah error Prisma/low-level menjadi pesan Indonesia yang aman ditampilkan. */
+function toFriendlyError(err: unknown, fallback: string): string {
+  const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : ""
+  switch (code) {
+    case "P2025": return "Data sudah tidak ada. Mungkin baru dihapus di tempat lain."
+    case "P2002": return "Data dengan identitas itu sudah ada."
+    case "P2003": return "Kategori yang dipilih tidak valid."
+    default: return fallback
+  }
 }
 
-export async function deleteProject(id: string): Promise<void> {
-  await prisma.project.delete({ where: { id } })
-  revalidatePath("/")
+/* -------------------------------------------------------------------------- */
+/* Mutasi — semuanya mengembalikan ActionResult, tidak pernah melempar         */
+/* -------------------------------------------------------------------------- */
+
+export async function createProject(data: ProjectFormData): Promise<ActionResult<Project>> {
+  const validationError = validateProject(data)
+  if (validationError) return { ok: false, error: validationError }
+  const catError = await categoryGuard(data.categoryId)
+  if (catError) return { ok: false, error: catError }
+
+  try {
+    const p = await prisma.project.create({
+      data: {
+        clientName: data.clientName.trim(),
+        projectTitle: data.projectTitle.trim(),
+        categoryId: data.categoryId,
+        price: data.price,
+        status: toPrismaStatus(data.status),
+        deadline: new Date(data.deadline),
+        notes: data.notes?.trim() || "",
+        previewImage: data.previewImage || null,
+      },
+      include: PROJECT_INCLUDE,
+    })
+    return { ok: true, data: mapProject(p) }
+  } catch (err) {
+    console.error("[createProject]", err)
+    return { ok: false, error: toFriendlyError(err, "Gagal menyimpan proyek baru.") }
+  }
 }
 
-export async function updateProjectStatus(id: string, status: ProjectStatus): Promise<Project> {
-  const p = await prisma.project.update({
-    where: { id },
-    data: { status },
-    include: { category: true },
-  })
-  revalidatePath("/")
-  return mapProject(p)
+export async function updateProject(id: string, data: ProjectFormData): Promise<ActionResult<Project>> {
+  const validationError = validateProject(data)
+  if (validationError) return { ok: false, error: validationError }
+  const catError = await categoryGuard(data.categoryId)
+  if (catError) return { ok: false, error: catError }
+
+  try {
+    const p = await prisma.project.update({
+      where: { id },
+      data: {
+        clientName: data.clientName.trim(),
+        projectTitle: data.projectTitle.trim(),
+        categoryId: data.categoryId,
+        price: data.price,
+        status: toPrismaStatus(data.status),
+        deadline: new Date(data.deadline),
+        notes: data.notes?.trim() || "",
+        previewImage: data.previewImage || null,
+      },
+      include: PROJECT_INCLUDE,
+    })
+    return { ok: true, data: mapProject(p) }
+  } catch (err) {
+    console.error("[updateProject]", err)
+    return { ok: false, error: toFriendlyError(err, "Gagal memperbarui proyek.") }
+  }
 }
 
+export async function deleteProject(id: string): Promise<ActionResult<{ id: string }>> {
+  try {
+    await prisma.project.delete({ where: { id } })
+    return { ok: true, data: { id } }
+  } catch (err) {
+    console.error("[deleteProject]", err)
+    return { ok: false, error: toFriendlyError(err, "Gagal menghapus proyek.") }
+  }
+}
 
+export async function updateProjectStatus(
+  id: string,
+  status: ProjectStatus,
+): Promise<ActionResult<Project>> {
+  if (!isProjectStatus(status)) return { ok: false, error: "Status tidak dikenal." }
+  try {
+    const p = await prisma.project.update({
+      where: { id },
+      data: { status: toPrismaStatus(status) },
+      include: PROJECT_INCLUDE,
+    })
+    return { ok: true, data: mapProject(p) }
+  } catch (err) {
+    console.error("[updateProjectStatus]", err)
+    return { ok: false, error: toFriendlyError(err, "Gagal mengubah status.") }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Laporan — diturunkan dari data, bukan angka karangan                       */
+/* -------------------------------------------------------------------------- */

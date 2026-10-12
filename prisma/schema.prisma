@@ -7,20 +7,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Status proyek sebagai enum, bukan String bebas.
+/// Sebelumnya nilai apa pun bisa tersimpan, dan satu typo membuat proyek
+/// hilang dari semua filter tanpa error.
+enum ProjectStatus {
+  On_Progress
+  Revisi
+  Done
+  Cancel
+}
+
 model Project {
-  id           String   @id @default(uuid())
+  id           String        @id @default(uuid())
   clientName   String
   projectTitle String
   categoryId   String
-  category     Category @relation(fields: [categoryId], references: [id])
+  category     Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   price        Float
-  status       String   @default("On Progress")
+  status       ProjectStatus @default(On_Progress)
   deadline     DateTime
-  notes        String   @default("") @db.Text
-  previewImage String?  @db.Text
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  notes        String        @default("") @db.Text
+  previewImage String?       @db.Text
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
+  @@index([categoryId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([deadline])
   @@map("projects")
 }
 

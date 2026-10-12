@@ -2,51 +2,28 @@
 
 import { useState, useMemo } from "react"
 import type { Project } from "@/types"
-import { BarChart3, TrendingUp, Info } from "lucide-react"
+import { BarChart3, TrendingUp, Info, CalendarRange } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
+import { buildMonthlySeries, buildCategorySlices, computeStats } from "@/lib/analytics"
 
 interface AnalyticsSectionProps {
   projects: Project[]
-  darkMode: boolean
 }
 
-export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectionProps) {
+export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
   const [hoveredMonth, setHoveredMonth] = useState<number | null>(null)
 
-  const statusDistribution = useMemo(() => {
-    const counts = { "On Progress": 0, Revisi: 0, Done: 0, Cancel: 0 }
-    projects.forEach((p) => { counts[p.status as keyof typeof counts]++ })
-    return counts
-  }, [projects])
+  const statusDistribution = useMemo(() => computeStats(projects), [projects])
+  const categoryDistribution = useMemo(() => buildCategorySlices(projects), [projects])
+  const monthlyData = useMemo(() => buildMonthlySeries(projects), [projects])
 
-  const categoryDistribution = useMemo(() => {
-    const counts: Record<string, number> = {}
-    projects.forEach((p) => { counts[p.category.name] = (counts[p.category.name] || 0) + 1 })
-    return Object.entries(counts).sort((a, b) => b[1] - a[1])
-  }, [projects])
-
-  const monthlyData = useMemo(() => {
-    const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli"]
-    const income = [800000, 1500000, 1200000, 3100000, 2400000, 4800000, 3200000]
-    const count = [1, 2, 2, 4, 3, 5, 3]
-
-    projects.forEach((p) => {
-      const d = new Date(p.createdAt)
-      const mm = String(d.getMonth() + 1).padStart(2, "0")
-      const idx = parseInt(mm) - 1
-      if (idx >= 0 && idx < 7) {
-        count[idx]++
-        if (p.status === "Done") income[idx] += p.price
-      }
-    })
-
-    return months.map((name, i) => ({ name, shortName: name.slice(0, 3), income: income[i], count: count[i] }))
-  }, [projects])
-
-  const maxIncome = Math.max(...monthlyData.map((d) => d.income), 5000000)
+  const hasAnyData = projects.length > 0
+  const maxIncome = Math.max(...monthlyData.map((d) => d.income), 1)
   const totalCount = projects.length
-  const doneCount = projects.filter((p) => p.status === "Done").length
+  const doneCount = statusDistribution.done
   const completionRate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
+  const peakMonth = monthlyData.reduce((a, b) => (b.income > a.income ? b : a), monthlyData[0])
+  const yearLabel = new Date().getFullYear()
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -56,8 +33,8 @@ export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectio
           <p className="text-xs text-neutral-450 dark:text-neutral-400 mt-0.5">Grafik dan statistik nilai proyek dari waktu ke waktu.</p>
         </div>
         <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white/60 dark:bg-[#121214] border border-neutral-150 dark:border-neutral-850 rounded text-[9px] text-neutral-500 dark:text-neutral-400 font-mono tracking-wider">
-          <Info className="w-3.5 h-3.5 opacity-70" />
-          <span>SINKRON</span>
+          <CalendarRange className="w-3.5 h-3.5 opacity-70" />
+          <span>{yearLabel}</span>
         </div>
       </div>
 
@@ -74,7 +51,13 @@ export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectio
             </div>
             <svg className="w-full h-full transform -rotate-90 scale-90" viewBox="0 0 100 100">
               <circle cx="50" cy="50" r="42" strokeWidth="1.5" className="stroke-neutral-100 dark:stroke-neutral-850" fill="transparent" />
-              <circle cx="50" cy="50" r="42" stroke={darkMode ? "#ffffff" : "#000000"} strokeWidth="3" strokeDasharray={`${completionRate * 2.64} 264`} strokeLinecap="round" fill="transparent" className="transition-all duration-1000" />
+              {/* warna diambil dari token tema, bukan boolean darkMode yang di-drill dari induk */}
+              <circle
+                cx="50" cy="50" r="42" strokeWidth="3"
+                className="stroke-neutral-950 dark:stroke-neutral-50"
+                strokeDasharray={`${completionRate * 2.64} 264`}
+                strokeLinecap="round" fill="transparent"
+              />
             </svg>
             <div className="absolute flex flex-col items-center justify-center w-32 h-32 rounded-full">
               <span className="text-4xl font-light text-neutral-950 dark:text-neutral-50 tracking-tighter flex items-start">
@@ -86,22 +69,17 @@ export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectio
           </div>
 
           <div className="w-full grid grid-cols-4 gap-2 border-t border-neutral-100 dark:border-neutral-900 pt-5">
-            <div className="text-center">
-              <span className="text-[8px] uppercase tracking-[0.1em] text-neutral-400 dark:text-neutral-500 block">Selesai</span>
-              <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-550 mt-0.5 block font-mono">{statusDistribution.Done}</span>
-            </div>
-            <div className="text-center border-l border-neutral-100 dark:border-neutral-900">
-              <span className="text-[8px] uppercase tracking-[0.1em] text-neutral-400 dark:text-neutral-500 block">Berjalan</span>
-              <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-550 mt-0.5 block font-mono">{statusDistribution["On Progress"]}</span>
-            </div>
-            <div className="text-center border-l border-neutral-100 dark:border-neutral-900">
-              <span className="text-[8px] uppercase tracking-[0.1em] text-neutral-400 dark:text-neutral-500 block">Revisi</span>
-              <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-550 mt-0.5 block font-mono">{statusDistribution.Revisi}</span>
-            </div>
-            <div className="text-center border-l border-neutral-100 dark:border-neutral-900">
-              <span className="text-[8px] uppercase tracking-[0.1em] text-neutral-400 dark:text-neutral-500 block">Batal</span>
-              <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-550 mt-0.5 block font-mono">{statusDistribution.Cancel}</span>
-            </div>
+            {([
+              ["Selesai", statusDistribution.done],
+              ["Berjalan", statusDistribution.onProgress],
+              ["Revisi", statusDistribution.revisi],
+              ["Batal", statusDistribution.cancel],
+            ] as const).map(([label, value], i) => (
+              <div key={label} className={`text-center ${i > 0 ? "border-l border-neutral-100 dark:border-neutral-900" : ""}`}>
+                <span className="text-[8px] uppercase tracking-[0.1em] text-neutral-400 dark:text-neutral-500 block">{label}</span>
+                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-550 mt-0.5 block font-mono">{value}</span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -113,12 +91,17 @@ export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectio
               </div>
               <div>
                 <span className="text-xs font-semibold text-neutral-850 dark:text-neutral-150 block">Pendapatan Bulanan</span>
-                <span className="text-[10px] text-neutral-400 dark:text-neutral-500 block">Riwayat pendapatan per bulan</span>
+                <span className="text-[10px] text-neutral-400 dark:text-neutral-500 block">Proyek selesai per bulan, {yearLabel}</span>
               </div>
             </div>
             <div className="text-left sm:text-right shrink-0">
               <span className="text-[9px] uppercase tracking-[0.15em] font-medium text-neutral-400 dark:text-neutral-500 block">Tertinggi</span>
-              <span className="text-sm font-light text-neutral-950 dark:text-neutral-50 tracking-tight block">{formatCurrency(maxIncome)}</span>
+              <span className="text-sm font-light text-neutral-950 dark:text-neutral-50 tracking-tight block">
+                {hasAnyData ? formatCurrency(peakMonth.income) : "—"}
+              </span>
+              {hasAnyData && peakMonth.income > 0 && (
+                <span className="text-[9px] text-neutral-400 dark:text-neutral-500 block">{peakMonth.name}</span>
+              )}
             </div>
           </div>
 
@@ -132,46 +115,72 @@ export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectio
               {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => (
                 <div key={idx} className="absolute left-0 right-0 border-t border-neutral-100 dark:border-neutral-900/40 pointer-events-none" style={{ bottom: `${ratio * 100}%` }} />
               ))}
-              <svg className="w-full h-full overflow-visible z-10" viewBox="0 0 500 150" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="appleInkShadow" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={darkMode ? "#ffffff" : "#000000"} stopOpacity="0.08" />
-                    <stop offset="100%" stopColor={darkMode ? "#ffffff" : "#000000"} stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-                <line x1="0" y1="150" x2="500" y2="150" stroke="#e5e5ea" className="dark:stroke-neutral-900" strokeWidth="1" />
-                {(() => {
-                  const points = monthlyData.map((d, idx) => {
-                    const x = idx * 83.3
-                    const y = 150 - (d.income / maxIncome) * 135
-                    return { x, y }
-                  })
-                  let dPath = `M ${points[0].x},${points[0].y}`
-                  for (let i = 0; i < points.length - 1; i++) {
-                    dPath += ` C ${points[i].x + 35},${points[i].y} ${points[i + 1].x - 35},${points[i + 1].y} ${points[i + 1].x},${points[i + 1].y}`
-                  }
-                  return (
-                    <>
-                      <path d={`${dPath} L 500,150 L 0,150 Z`} fill="url(#appleInkShadow)" className="transition-all duration-500" />
-                      <path d={dPath} fill="none" stroke={darkMode ? "#ffffff" : "#000000"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </>
-                  )
-                })()}
-                {monthlyData.map((d, idx) => {
-                  const x = idx * 83.3
-                  const y = 150 - (d.income / maxIncome) * 135
-                  const isHovered = hoveredMonth === idx
-                  return (
-                    <g key={idx} className="cursor-pointer">
-                      {isHovered && <line x1={x} y1="150" x2={x} y2={y} stroke={darkMode ? "#ffffff" : "#000000"} strokeWidth="0.8" strokeDasharray="2,2" className="opacity-50" />}
-                      <circle cx={x} cy={y} r={isHovered ? "4.5" : "3"} fill={isHovered ? (darkMode ? "#ffffff" : "#000000") : (darkMode ? "#0d0d0f" : "#ffffff")} stroke={darkMode ? "#ffffff" : "#000000"} strokeWidth="1.5" onMouseEnter={() => setHoveredMonth(idx)} onMouseLeave={() => setHoveredMonth(null)} className="transition-all duration-150" />
-                    </g>
-                  )
-                })}
-              </svg>
+
+              {!hasAnyData ? (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-[11px] text-neutral-400 dark:text-neutral-500">Belum ada proyek untuk digambarkan.</span>
+                </div>
+              ) : (
+                <svg className="w-full h-full overflow-visible z-10" viewBox="0 0 1100 150" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="incomeShadow" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="currentColor" stopOpacity="0.10" />
+                      <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  {/* garis dasar memakai currentColor + text-* sehingga otomatis ikut tema */}
+                  <g className="text-neutral-950 dark:text-neutral-50">
+                    <line x1="0" y1="150" x2="1100" y2="150" className="stroke-neutral-200 dark:stroke-neutral-900" strokeWidth="1" />
+                    {(() => {
+                      const step = 1100 / (monthlyData.length - 1 || 1)
+                      const points = monthlyData.map((d, idx) => ({
+                        x: idx * step,
+                        y: 150 - (d.income / maxIncome) * 135,
+                      }))
+                      let dPath = `M ${points[0].x},${points[0].y}`
+                      for (let i = 0; i < points.length - 1; i++) {
+                        const cx = (points[i + 1].x - points[i].x) / 2.6
+                        dPath += ` C ${points[i].x + cx},${points[i].y} ${points[i + 1].x - cx},${points[i + 1].y} ${points[i + 1].x},${points[i + 1].y}`
+                      }
+                      return (
+                        <>
+                          <path d={`${dPath} L 1100,150 L 0,150 Z`} fill="url(#incomeShadow)" className="transition-all duration-500" />
+                          <path d={dPath} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                          {points.map((pt, idx) => (
+                            <g key={idx}>
+                              {hoveredMonth === idx && (
+                                <line x1={pt.x} y1="150" x2={pt.x} y2={pt.y} stroke="currentColor" strokeWidth="1" strokeDasharray="3,3" className="opacity-40" vectorEffect="non-scaling-stroke" />
+                              )}
+                              <circle
+                                cx={pt.x} cy={pt.y} r="3"
+                                fill="currentColor"
+                                className="cursor-pointer transition-all duration-150"
+                                onMouseEnter={() => setHoveredMonth(idx)}
+                                onMouseLeave={() => setHoveredMonth(null)}
+                                style={{ transform: hoveredMonth === idx ? "scale(1.6)" : "scale(1)", transformOrigin: `${pt.x}px ${pt.y}px` }}
+                              />
+                              {/* target hover yang lebih besar supaya bulan bernilai kecil tetap mudah disorot */}
+                              <circle
+                                cx={pt.x} cy={pt.y} r="12" fill="transparent"
+                                className="cursor-pointer"
+                                onMouseEnter={() => setHoveredMonth(idx)}
+                                onMouseLeave={() => setHoveredMonth(null)}
+                              />
+                            </g>
+                          ))}
+                        </>
+                      )
+                    })()}
+                  </g>
+                </svg>
+              )}
+
               {hoveredMonth !== null && (
-                <div className="absolute z-40 bg-white/95 dark:bg-[#121214]/95 border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2.5 shadow-xl pointer-events-none backdrop-blur-md animate-fade-in" style={{ left: `${(hoveredMonth / 6) * 100}%`, transform: "translateX(-50%)", bottom: "35%" }}>
-                  <div className="text-[9px] text-neutral-400 dark:text-neutral-500 tracking-wider uppercase font-medium">{monthlyData[hoveredMonth].name}</div>
+                <div
+                  className="absolute z-40 bg-white/95 dark:bg-[#121214]/95 border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2.5 shadow-xl pointer-events-none backdrop-blur-md animate-fade-in"
+                  style={{ left: `${(hoveredMonth / (monthlyData.length - 1)) * 100}%`, transform: "translateX(-50%)", bottom: "35%" }}
+                >
+                  <div className="text-[9px] text-neutral-400 dark:text-neutral-500 tracking-wider uppercase font-medium">{monthlyData[hoveredMonth].name} {yearLabel}</div>
                   <div className="text-xs font-semibold text-neutral-950 dark:text-neutral-50 mt-1">{formatCurrency(monthlyData[hoveredMonth].income)}</div>
                   <div className="text-[10px] text-neutral-550 dark:text-neutral-455 mt-0.5">{monthlyData[hoveredMonth].count} Proyek</div>
                 </div>
@@ -182,7 +191,7 @@ export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectio
             <div className="w-14 shrink-0" />
             <div className="flex-1 flex justify-between border-t border-neutral-100 dark:border-neutral-900 pt-3">
               {monthlyData.map((d, idx) => (
-                <span key={idx} className={`text-[9.5px] tracking-wide uppercase ${hoveredMonth === idx ? "text-neutral-950 dark:text-neutral-50 font-semibold" : "text-neutral-400"}`}>{d.shortName}</span>
+                <span key={d.key} className={`text-[9.5px] tracking-wide uppercase ${hoveredMonth === idx ? "text-neutral-950 dark:text-neutral-50 font-semibold" : "text-neutral-400"}`}>{d.shortName}</span>
               ))}
             </div>
           </div>
@@ -199,25 +208,30 @@ export default function AnalyticsSection({ projects, darkMode }: AnalyticsSectio
             <span className="text-[10px] text-neutral-400 dark:text-neutral-500 block">Sebaran proyek berdasarkan kategori</span>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4">
-          {categoryDistribution.map(([catName, count], idx) => {
-            const ratio = totalCount > 0 ? (count / totalCount) * 100 : 0
-            return (
-              <div key={idx} className="space-y-1">
+        {categoryDistribution.length === 0 ? (
+          <div className="flex items-center gap-2 py-8 justify-center">
+            <Info className="w-3.5 h-3.5 text-neutral-400" />
+            <span className="text-[11px] text-neutral-400 dark:text-neutral-500">Belum ada proyek untuk dihitung.</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4">
+            {categoryDistribution.map((slice) => (
+              <div key={slice.id} className="space-y-1">
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-neutral-800 dark:text-neutral-300 font-medium">{catName}</span>
+                  <span className="text-neutral-800 dark:text-neutral-300 font-medium">{slice.name}</span>
                   <div className="flex items-center gap-1.5 font-medium">
-                    <span className="text-neutral-450 dark:text-neutral-500 text-[10px]">{count} proyek</span>
-                    <span className="text-neutral-850 dark:text-neutral-300 font-mono text-[10px]">({Math.round(ratio)}%)</span>
+                    <span className="text-neutral-450 dark:text-neutral-500 text-[10px]">{slice.count} proyek</span>
+                    <span className="text-neutral-850 dark:text-neutral-300 font-mono text-[10px]">({Math.round(slice.ratio)}%)</span>
                   </div>
                 </div>
                 <div className="w-full h-1.5 bg-neutral-100 dark:bg-neutral-900 rounded-full overflow-hidden">
-                  <div className="h-full bg-neutral-950 dark:bg-[#f5f5f7] rounded-full transition-all duration-700" style={{ width: `${Math.min(ratio, 100)}%` }} />
+                  <div className="h-full bg-neutral-950 dark:bg-[#f5f5f7] rounded-full transition-all duration-700" style={{ width: `${Math.min(slice.ratio, 100)}%` }} />
                 </div>
+                <span className="text-[9.5px] text-neutral-400 dark:text-neutral-500 font-mono block">{formatCurrency(slice.totalValue)}</span>
               </div>
-            )
-          })}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
