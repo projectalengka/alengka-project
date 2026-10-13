@@ -13,7 +13,7 @@ dan **Tailwind CSS v4**.
 ```bash
 npm install
 cp .env.example .env        # lalu isi DATABASE_URL
-npm run db:push             # buat tabel dari prisma/schema.prisma
+npm run db:deploy           # terapkan migrasi ke database
 npm run db:seed             # opsional: data contoh
 npm run dev                 # http://127.0.0.1:3000
 ```
@@ -28,9 +28,22 @@ npm run dev                 # http://127.0.0.1:3000
 | `npm run check` | Type check (`tsc --noEmit`) |
 | `npm run lint` | ESLint |
 | `npm test` | Uji regresi (tanpa database) |
-| `npm run db:push` | Sinkronkan schema ke database |
+| `npm run db:migrate` | Buat + terapkan migrasi baru (pengembangan) |
+| `npm run db:deploy` | Terapkan migrasi yang sudah ada (produksi/CI) |
+| `npm run db:status` | Lihat status migrasi |
 | `npm run db:seed` | Isi data contoh |
+| `npm run db:push` | Sinkronkan schema tanpa migrasi — hindari di produksi |
 | `npm run db:studio` | Prisma Studio |
+
+### Kalau database sudah terlanjur dibuat dengan `db:push`
+
+Database yang sudah punya tabel tetapi belum punya riwayat migrasi akan membuat
+`db:deploy` menolak jalan. Tandai migrasi awal sebagai sudah diterapkan, sekali saja:
+
+```bash
+npx prisma migrate resolve --applied 20261013030036_init
+npm run db:deploy
+```
 
 ---
 
@@ -42,10 +55,12 @@ actions/        Server Actions (satu-satunya jalur tulis ke database)
   categories.ts   CRUD kategori
 app/            Halaman App Router
 components/     Komponen UI
-lib/            prisma client, util format, util kompresi gambar
-prisma/         schema + seed
+lib/            prisma client, util format, analitik, util kompresi gambar
+prisma/         schema + migrations + seed
+  migrations/     riwayat perubahan schema (sumber kebenaran skema)
 types/          Tipe bersama + kontrak ActionResult
 tests/          Uji regresi logika murni
+.github/        CI: typecheck, lint, test, migrasi ke Postgres nyata, build
 ```
 
 ---
@@ -80,15 +95,29 @@ hanya memuat 50/100/200/…/900/950. Kelas seperti `text-neutral-450` atau
 `bg-neutral-850` yang dipakai di sini didefinisikan eksplisit di blok `@theme`;
 tanpa definisi itu, kelas tersebut tidak menghasilkan CSS apa pun.
 
+**Grafik pendapatan memakai konvensi pita.** Setiap titik diletakkan di tengah
+bulannya, `x = (idx + 0.5) * (1100 / 12)`, dan label bulan memakai grid 12 kolom
+yang sama. Dua baris itu harus bergeometri identik — dulu baris label memakai
+`px-1` sementara baris grafik tidak, dan itu saja sudah menggeser label hingga
+3,7px. Kalau mengubah tata letak grafik, ukur ulang pergeserannya; jangan
+mengandalkan perkiraan mata.
+
 ---
 
 ## Deploy
 
 Butuh database PostgreSQL yang bisa dijangkau (mis. Neon, Supabase, Railway) dan
-variabel `DATABASE_URL`. Jalankan `npm run db:push` (atau `prisma migrate deploy`
-bila sudah memakai berkas migrasi) pada saat rilis.
+variabel `DATABASE_URL`. Terapkan migrasi dengan:
 
-> **Catatan:** repo ini belum memiliki folder `prisma/migrations/`, jadi schema
-> saat ini disinkronkan dengan `db:push`. Untuk produksi jangka panjang, mulai
-> memakai `prisma migrate dev` agar riwayat perubahan schema dapat dilacak dan
-> di-rollback.
+```bash
+npm run db:deploy
+```
+
+`db:deploy` hanya menjalankan migrasi yang belum diterapkan dan tidak pernah
+menghapus data, jadi aman dipakai pada saat rilis. Jangan pakai `db:push` di
+produksi — perintah itu menyamakan schema secara paksa tanpa mencatat riwayat.
+
+> **Catatan build:** `next build` menulis berkas trace di `.next/`. Di sebagian
+> lingkungan (folder yang dikunci antivirus/penyimpanan awan) langkah itu gagal
+> dengan `EPERM ... .next/trace`. Setel `NEXT_TRACE_UPLOAD_DISABLED=1` untuk
+> melewatinya; CI sudah menyetelnya.

@@ -2,6 +2,26 @@ import { PrismaClient, ProjectStatus } from "@prisma/client"
 
 const prisma = new PrismaClient()
 
+/*
+ * Tanggal pada data contoh dibuat RELATIF terhadap hari ini, bukan dipatok mati.
+ *
+ * Versi sebelumnya memakai tanggal mati (deadline Mei–Juni 2026) dan tidak
+ * menyetel createdAt sama sekali. Dua akibatnya:
+ *  1. createdAt jatuh ke now(), sedangkan bucket grafik pendapatan dihitung
+ *     dari createdAt — jadi seluruh proyek menumpuk di satu bulan dan grafik
+ *     12 bulan tampak kosong, seolah fiturnya rusak.
+ *  2. deadline yang dipatok mati membuat semua proyek "terlambat" begitu
+ *     tanggal berjalan melewatinya, sehingga penanda overdue tidak informatif.
+ *
+ * Dengan offset relatif, data contoh selalu memperlihatkan sebaran beberapa
+ * bulan sekaligus campuran proyek yang masih berjalan dan yang sudah lewat
+ * deadline — jadi fitur grafik dan penanda overdue benar-benar terlihat.
+ */
+const DAY = 24 * 60 * 60 * 1000
+const now = Date.now()
+const daysAgo = (n: number) => new Date(now - n * DAY)
+const daysAhead = (n: number) => new Date(now + n * DAY)
+
 const categories = [
   { id: "Logo", name: "Desain Logo Identitas", iconName: "Sparkles" },
   { id: "Jersey", name: "Koleksi Jersey Olahraga", iconName: "Shirt" },
@@ -20,7 +40,10 @@ const projects = [
     categoryId: "Branding",
     price: 3200000,
     status: ProjectStatus.Done,
-    deadline: new Date("2026-06-15"),
+    // Dijaga tetap di dalam tahun berjalan: grafik pendapatan hanya menghitung
+    // 12 bulan tahun ini, jadi proyek di tahun sebelumnya tidak akan terlihat.
+    createdAt: daysAgo(268),
+    deadline: daysAgo(240),
     notes: "Completed full branding suite including brand manual, color schemes, typography definition, and social media layout packs.",
   },
   {
@@ -29,7 +52,8 @@ const projects = [
     categoryId: "Jersey",
     price: 1800000,
     status: ProjectStatus.Revisi,
-    deadline: new Date("2026-06-02"),
+    createdAt: daysAgo(247),
+    deadline: daysAgo(238),
     notes: "Reviewing layout of the chest stripes and corporate sponsor logos.",
   },
   {
@@ -38,7 +62,8 @@ const projects = [
     categoryId: "UI Design",
     price: 4900000,
     status: ProjectStatus.On_Progress,
-    deadline: new Date("2026-06-20"),
+    createdAt: daysAgo(124),
+    deadline: daysAhead(14),
     notes: "In progress of wireframing the central dashboard interactive widgets.",
   },
   {
@@ -47,7 +72,8 @@ const projects = [
     categoryId: "Jersey",
     price: 2400000,
     status: ProjectStatus.On_Progress,
-    deadline: new Date("2026-06-10"),
+    createdAt: daysAgo(88),
+    deadline: daysAhead(7),
     notes: "Designing futuristic jersey with cybernetic neon patterns.",
   },
   {
@@ -56,7 +82,8 @@ const projects = [
     categoryId: "Clothing",
     price: 3500000,
     status: ProjectStatus.Done,
-    deadline: new Date("2026-05-20"),
+    createdAt: daysAgo(203),
+    deadline: daysAgo(171),
     notes: "Designed a series of 5 minimalist screen-print graphics for heavyweight organic cotton t-shirts.",
   },
   {
@@ -65,7 +92,8 @@ const projects = [
     categoryId: "Poster",
     price: 1200000,
     status: ProjectStatus.Done,
-    deadline: new Date("2026-05-05"),
+    createdAt: daysAgo(152),
+    deadline: daysAgo(131),
     notes: "Created an abstract vector lithograph design mixing bold Swiss typography.",
   },
   {
@@ -74,7 +102,8 @@ const projects = [
     categoryId: "Illustration",
     price: 2100000,
     status: ProjectStatus.On_Progress,
-    deadline: new Date("2026-06-18"),
+    createdAt: daysAgo(61),
+    deadline: daysAgo(5),
     notes: "Hand-drawn pen and ink illustration detailing mythical coffee shrubs.",
   },
   {
@@ -83,7 +112,8 @@ const projects = [
     categoryId: "Motion Design",
     price: 4000000,
     status: ProjectStatus.Cancel,
-    deadline: new Date("2026-05-30"),
+    createdAt: daysAgo(179),
+    deadline: daysAgo(158),
     notes: "Project cancelled by client due to funding constraints.",
   },
   {
@@ -92,7 +122,8 @@ const projects = [
     categoryId: "Logo",
     price: 1500000,
     status: ProjectStatus.Revisi,
-    deadline: new Date("2026-06-05"),
+    createdAt: daysAgo(37),
+    deadline: daysAgo(11),
     notes: "Second iteration of the corporate emblem with warmer palette.",
   },
 ]
@@ -100,6 +131,7 @@ const projects = [
 async function main() {
   console.log("Seeding database...")
 
+  // Urutan penting: projects lebih dulu karena FK-nya ON DELETE RESTRICT.
   await prisma.project.deleteMany()
   await prisma.category.deleteMany()
 

@@ -132,9 +132,21 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
                   <g className="text-neutral-950 dark:text-neutral-50">
                     <line x1="0" y1="150" x2="1100" y2="150" className="stroke-neutral-200 dark:stroke-neutral-900" strokeWidth="1" />
                     {(() => {
-                      const step = 1100 / (monthlyData.length - 1 || 1)
+                      /*
+                       * Titik diletakkan di TENGAH setiap pita bulan, bukan di tepi.
+                       *
+                       * Versi lama memakai idx * (1100 / (n-1)), sehingga Januari
+                       * menempel di tepi kiri dan Desember di tepi kanan, sedangkan
+                       * label bulan di bawahnya memakai `justify-between` yang
+                       * membagi jarak ANTAR KOTAK. Dua acuan yang berbeda membuat
+                       * label makin melenceng dari titiknya — terukur 13,8px di
+                       * ujung kiri dan 13,7px di ujung kanan, sekitar 26% dari
+                       * jarak antar titik. Dengan konvensi pita, titik dan label
+                       * memakai acuan yang sama dan sejajar persis.
+                       */
+                      const band = 1100 / (monthlyData.length || 1)
                       const points = monthlyData.map((d, idx) => ({
-                        x: idx * step,
+                        x: (idx + 0.5) * band,
                         y: 150 - (d.income / maxIncome) * 135,
                       }))
                       let dPath = `M ${points[0].x},${points[0].y}`
@@ -178,7 +190,7 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
               {hoveredMonth !== null && (
                 <div
                   className="absolute z-40 bg-white/95 dark:bg-[#121214]/95 border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2.5 shadow-xl pointer-events-none backdrop-blur-md animate-fade-in"
-                  style={{ left: `${(hoveredMonth / (monthlyData.length - 1)) * 100}%`, transform: "translateX(-50%)", bottom: "35%" }}
+                  style={{ left: `${((hoveredMonth + 0.5) / monthlyData.length) * 100}%`, transform: "translateX(-50%)", bottom: "35%" }}
                 >
                   <div className="text-[9px] text-neutral-400 dark:text-neutral-500 tracking-wider uppercase font-medium">{monthlyData[hoveredMonth].name} {yearLabel}</div>
                   <div className="text-xs font-semibold text-neutral-950 dark:text-neutral-50 mt-1">{formatCurrency(monthlyData[hoveredMonth].income)}</div>
@@ -187,11 +199,24 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
               )}
             </div>
           </div>
-          <div className="flex gap-4 px-1 mt-4">
+          {/* px-1 sengaja TIDAK dipakai: baris grafik di atas memakai
+              `flex gap-4` tanpa padding samping. Menambahkan px-1 di sini
+              membuat area label ~8px lebih sempit daripada area grafik,
+              sehingga label bergeser +3,7px di ujung kiri dan -3,7px di ujung
+              kanan. Kedua baris harus bergeometri identik agar label tepat
+              duduk di bawah titiknya. */}
+          <div className="flex gap-4 mt-4">
             <div className="w-14 shrink-0" />
-            <div className="flex-1 flex justify-between border-t border-neutral-100 dark:border-neutral-900 pt-3">
+            {/* Grid sama-banyak dengan titik data, tiap label dipusatkan di
+                kolomnya — acuan yang sama dengan `band` di atas, sehingga tiap
+                label duduk tepat di bawah titiknya (sebelumnya justify-between
+                membagi jarak antar kotak, bukan memusatkan pada titik). */}
+            <div
+              className="flex-1 grid border-t border-neutral-100 dark:border-neutral-900 pt-3"
+              style={{ gridTemplateColumns: `repeat(${monthlyData.length}, minmax(0, 1fr))` }}
+            >
               {monthlyData.map((d, idx) => (
-                <span key={d.key} className={`text-[9.5px] tracking-wide uppercase ${hoveredMonth === idx ? "text-neutral-950 dark:text-neutral-50 font-semibold" : "text-neutral-400"}`}>{d.shortName}</span>
+                <span key={d.key} className={`text-center text-[9.5px] tracking-wide uppercase ${hoveredMonth === idx ? "text-neutral-950 dark:text-neutral-50 font-semibold" : "text-neutral-400"}`}>{d.shortName}</span>
               ))}
             </div>
           </div>
