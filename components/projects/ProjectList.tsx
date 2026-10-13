@@ -17,7 +17,7 @@ const InvoiceModal = dynamic(() => import("./InvoiceModal"), { ssr: false })
 function StatusBadge({ status }: { status: ProjectStatus }) {
   switch (status) {
     case "On Progress":
-      return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium rounded bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border border-neutral-200/50 dark:border-neutral-800"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />Berjalan</span>
+      return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium rounded bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border border-neutral-200/50 dark:border-neutral-800"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" />Berjalan</span>
     case "Revisi":
       return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium rounded bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-450 border border-neutral-200/50 dark:border-neutral-800"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />Revisi</span>
     case "Done":
@@ -33,6 +33,8 @@ interface ProjectListProps {
   onEdit: (project: Project) => void
   onDelete: (project: Project) => void
   onStatusChange: (id: string, status: ProjectStatus) => void
+  /** Memberi tahu halaman bahwa modal invoice terbuka, supaya poll dijeda. */
+  onInvoiceOpenChange?: (open: boolean) => void
   isDashboard?: boolean
 }
 
@@ -45,12 +47,17 @@ const statusLabels: Record<string, string> = {
 }
 
 export default function ProjectList({
-  projects, categories, onEdit, onDelete, onStatusChange, isDashboard = false,
+  projects, categories, onEdit, onDelete, onStatusChange, onInvoiceOpenChange, isDashboard = false,
 }: ProjectListProps) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
   const [expandedNotesId, setExpandedNotesId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false)
+
+  // Beri tahu induk supaya poll 30 detik dijeda selama invoice dibuka.
+  useEffect(() => {
+    onInvoiceOpenChange?.(isInvoiceOpen)
+  }, [isInvoiceOpen, onInvoiceOpenChange])
 
   /* Satu peta untuk semua lookup kategori.
      Sebelumnya getCatName/getCatIcon masing-masing menjalankan
@@ -119,6 +126,10 @@ export default function ProjectList({
 
   const visibleIds = useMemo(() => new Set(visibleProjects.map((p) => p.id)), [visibleProjects])
 
+  /* Set untuk uji keanggotaan O(1). Sebelumnya `selectedIds.includes(...)`
+     dipanggil di dalam loop baris (dan di setiap render) — O(n) tiap kali. */
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+
   /**
    * Pangkas pilihan yang sudah tidak terlihat.
    *
@@ -128,13 +139,14 @@ export default function ProjectList({
    */
   useEffect(() => {
     setSelectedIds((prev) => {
-      const next = prev.filter((id) => projects.some((p) => p.id === id))
+      const alive = new Set(projects.map((p) => p.id))
+      const next = prev.filter((id) => alive.has(id))
       return next.length === prev.length ? prev : next
     })
   }, [projects])
 
   const allVisibleSelected = visibleProjects.length > 0 &&
-    visibleProjects.every((p) => selectedIds.includes(p.id))
+    visibleProjects.every((p) => selectedSet.has(p.id))
 
   const toggleSelectAll = useCallback((checked: boolean) => {
     setSelectedIds(checked ? [...visibleIds] : [])
@@ -145,8 +157,8 @@ export default function ProjectList({
   }, [])
 
   const selectedProjects = useMemo(
-    () => projects.filter((p) => selectedIds.includes(p.id)),
-    [projects, selectedIds],
+    () => projects.filter((p) => selectedSet.has(p.id)),
+    [projects, selectedSet],
   )
 
   /* ----------------------------------------------------------- ekspor ---- */
@@ -185,7 +197,7 @@ export default function ProjectList({
                 const count = cat === "All" ? projects.length : (countsByCategory.get(cat) ?? 0)
                 return (
                   <button key={cat} onClick={() => setFilters((prev) => ({ ...prev, category: cat }))}
-                    className={`px-3.5 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    className={`px-3.5 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                       isSelected ? "bg-neutral-950 dark:bg-neutral-100 border-transparent text-white dark:text-neutral-950 shadow-xs" : "bg-white dark:bg-[#0d0d0f]/60 border-neutral-200 dark:border-neutral-900/60 text-neutral-550 dark:text-neutral-400 hover:bg-neutral-50/60 hover:text-neutral-950 dark:hover:text-white"
                     }`}>
                     {cat === "All" ? <Layers className="w-3.5 h-3.5" /> : getCatIcon(cat)}
@@ -202,7 +214,7 @@ export default function ProjectList({
               <div className="relative flex-1">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 w-3.5 h-3.5" />
                 <input type="text" placeholder="Cari klien atau proyek..." value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
-                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 text-xs pl-10 pr-4 py-2 rounded-lg text-neutral-800 dark:text-neutral-250 placeholder-neutral-400 focus:outline-none focus:border-neutral-350 dark:focus:border-neutral-700 transition-all" />
+                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 text-xs pl-10 pr-4 py-2 rounded-lg text-neutral-800 dark:text-neutral-250 placeholder-neutral-400 focus:outline-none focus:border-neutral-350 dark:focus:border-neutral-700 transition-colors" />
               </div>
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                 <div className="flex items-center gap-1.5 bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-2.5 py-1.5">
@@ -227,7 +239,7 @@ export default function ProjectList({
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
                 )}
-                <button onClick={handleExportCSV} disabled={visibleProjects.length === 0} className="px-3 py-1.5 border border-neutral-200 dark:border-neutral-850/50 text-neutral-500 bg-white dark:bg-[#121214]/30 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                <button onClick={handleExportCSV} disabled={visibleProjects.length === 0} className="px-3 py-1.5 border border-neutral-200 dark:border-neutral-850/50 text-neutral-500 bg-white dark:bg-[#121214]/30 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
                   <FileSpreadsheet className="w-3.5 h-3.5" />CSV
                 </button>
               </div>
@@ -262,13 +274,15 @@ export default function ProjectList({
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-neutral-200 dark:border-neutral-900 text-[8.5px] uppercase font-semibold tracking-[0.2em] text-neutral-400 dark:text-neutral-500">
-                    <th className="py-4 px-5 w-12">
-                      <input type="checkbox" checked={allVisibleSelected} onChange={(e) => toggleSelectAll(e.target.checked)}
-                        ref={(el) => {
-                          if (el) el.indeterminate = !allVisibleSelected && visibleProjects.some((p) => selectedIds.includes(p.id))
-                        }}
-                        aria-label="Pilih semua" className="w-3.5 h-3.5 rounded border-neutral-300 cursor-pointer" />
-                    </th>
+                    {!isDashboard && (
+                      <th className="py-4 px-5 w-12">
+                        <input type="checkbox" checked={allVisibleSelected} onChange={(e) => toggleSelectAll(e.target.checked)}
+                          ref={(el) => {
+                            if (el) el.indeterminate = !allVisibleSelected && visibleProjects.some((p) => selectedSet.has(p.id))
+                          }}
+                          aria-label="Pilih semua" className="w-3.5 h-3.5 rounded border-neutral-300 cursor-pointer" />
+                      </th>
+                    )}
                     <th className="py-4 px-6">Klien &amp; Proyek</th>
                     <th className="py-4 px-4 text-center">Kategori</th>
                     <th className="py-4 px-4 text-center">Status</th>
@@ -282,9 +296,11 @@ export default function ProjectList({
                     const late = isOverdue(p.deadline) && p.status !== "Done" && p.status !== "Cancel"
                     return (
                       <tr key={p.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-950/20 transition-colors text-xs">
-                        <td className="py-4 px-5 text-center">
-                          <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleOne(p.id)} className="w-3.5 h-3.5 rounded border-neutral-300 cursor-pointer" />
-                        </td>
+                        {!isDashboard && (
+                          <td className="py-4 px-5 text-center">
+                            <input type="checkbox" checked={selectedSet.has(p.id)} onChange={() => toggleOne(p.id)} className="w-3.5 h-3.5 rounded border-neutral-300 cursor-pointer" />
+                          </td>
+                        )}
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-4">
                             {p.previewImage ? (
@@ -350,7 +366,9 @@ export default function ProjectList({
                 <div key={p.id} className="bg-white dark:bg-[#0d0d0f]/50 border border-neutral-200 dark:border-neutral-900/60 rounded-xl p-5 space-y-4 shadow-xs">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2 max-w-[70%]">
-                      <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleOne(p.id)} className="w-3.5 h-3.5 rounded border-neutral-300 mt-0.5 cursor-pointer" />
+                      {!isDashboard && (
+                        <input type="checkbox" checked={selectedSet.has(p.id)} onChange={() => toggleOne(p.id)} className="w-3.5 h-3.5 rounded border-neutral-300 mt-0.5 cursor-pointer" />
+                      )}
                       <div className="space-y-0.5 truncate">
                         <span className="text-[9px] font-medium uppercase tracking-widest text-neutral-400 dark:text-neutral-500 block truncate">{p.clientName}</span>
                         <h4 className="text-xs font-semibold text-neutral-850 dark:text-neutral-200 leading-tight">{p.projectTitle}</h4>
@@ -400,7 +418,7 @@ export default function ProjectList({
         /* bottom-20 di mobile: bilah ini dulu bertumpuk dengan bottom nav
            (fixed bottom-0), sehingga keempat tombol navigasi tidak bisa
            diklik selama ada proyek terpilih. Di desktop bottom-6 seperti biasa. */
-        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[90] w-[calc(100%-2rem)] max-w-lg bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 rounded-xl p-4 shadow-2xl flex items-center justify-between gap-4 animate-slide-up">
+        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[90] w-[calc(100%-2rem)] max-w-lg bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 rounded-xl p-4 shadow-2xl flex items-center justify-between gap-4 animate-fade-in">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-950 rounded-lg"><FileSpreadsheet className="w-4 h-4 text-emerald-400 dark:text-emerald-600" /></div>
             <div className="flex flex-col">
@@ -410,7 +428,7 @@ export default function ProjectList({
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setSelectedIds([])} className="px-3 py-1.5 text-[10px] font-semibold text-neutral-450 hover:text-white dark:text-neutral-500 dark:hover:text-black hover:bg-white/10 dark:hover:bg-neutral-950/5 rounded-lg transition-colors cursor-pointer">Batal</button>
-            <button onClick={() => setIsInvoiceOpen(true)} className="px-3.5 py-1.5 bg-neutral-100 dark:bg-neutral-950 text-neutral-950 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-900 font-bold rounded-lg text-[11px] flex items-center gap-1.5 transition-all cursor-pointer">
+            <button onClick={() => setIsInvoiceOpen(true)} className="px-3.5 py-1.5 bg-neutral-100 dark:bg-neutral-950 text-neutral-950 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-900 font-bold rounded-lg text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer">
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />Buat Invoice
             </button>
           </div>

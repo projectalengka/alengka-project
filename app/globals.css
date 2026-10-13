@@ -38,27 +38,53 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/*
+ * Animasi sengaja dibuat seminimal mungkin.
+ *
+ * Yang DIHAPUS dan alasannya:
+ *  - animasi geser-naik (slide-up) — hanya menghias bilah "Buat Invoice";
+ *    diganti fade.
+ *  - `transform: translateY()` pada fade masuk — memicu paint tambahan;
+ *    kini murni opacity (compositor-only).
+ *  - durasi 400-500ms — terlalu panjang, terasa berat saat berpindah tab.
+ *  - Semua denyut tak berujung (pulse) di komponen — browser terus-menerus
+ *    melukis ulang elemennya selamanya, bahkan saat tab diam.
+ *
+ * Catatan kecil yang mudah terlewat: penulis kelas di dalam KOMENTAR pun
+ * terbaca oleh pemindai Tailwind v4, sehingga utilitasnya tetap ikut
+ * dihasilkan. Karena itu nama kelas di atas sengaja ditulis dalam bentuk
+ * prosa, bukan sebagai token kelas yang valid.
+ *
+ * Yang tersisa hanya dua, keduanya berdurasi pendek dan hanya menyentuh
+ * properti compositor (opacity / transform):
+ */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes shrink {
-  from { width: 100%; }
-  to { width: 0%; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.18s ease-out both;
 }
 
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px) translateX(-50%); }
-  to { opacity: 1; transform: translateY(0) translateX(-50%); }
+/*
+ * Bilah progres toast dulu menganimasikan `width` — properti LAYOUT, jadi
+ * setiap frame memaksa reflow selama 4 detik. Sekarang `transform: scaleX()`
+ * yang hanya dikerjakan compositor (tidak menyentuh layout sama sekali).
+ */
+@keyframes shrink {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
-.animate-slide-up {
-  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+/* Hormati preferensi pengguna yang meminta gerakan minimal. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }

@@ -20,7 +20,7 @@ const navItems = [
 export default function Sidebar({ activeTab, onTabChange, sidebarOpen, onToggleSidebar }: SidebarProps) {
   return (
     <>
-      <aside className={`hidden md:flex flex-col bg-white dark:bg-[#09090b] border-r border-[#e5e5eb] dark:border-neutral-900 h-screen sticky top-0 text-neutral-800 dark:text-neutral-200 transition-all duration-300 select-none flex-shrink-0 z-40 overflow-hidden ${sidebarOpen ? "w-64" : "w-0 !border-r-0"}`}>
+      <aside className={`hidden md:flex flex-col bg-white dark:bg-[#09090b] border-r border-[#e5e5eb] dark:border-neutral-900 h-screen sticky top-0 text-neutral-800 dark:text-neutral-200 transition-[width] duration-200 ease-out select-none flex-shrink-0 z-40 overflow-hidden ${sidebarOpen ? "w-64" : "w-0 !border-r-0"}`}>
         <div className="w-64 flex flex-col h-full shrink-0">
           <div className="p-8 border-b border-neutral-100 dark:border-neutral-900 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -44,7 +44,7 @@ export default function Sidebar({ activeTab, onTabChange, sidebarOpen, onToggleS
                   key={item.id}
                   onClick={() => onTabChange(item.id)}
                   aria-current={isActive ? "page" : undefined}
-                  className={`w-full flex items-center px-3 py-2.5 rounded-lg transition-all text-xs ${
+                  className={`w-full flex items-center px-3 py-2.5 rounded-lg transition-colors text-xs ${
                     isActive
                       ? "bg-neutral-100/60 dark:bg-neutral-900/60 text-neutral-950 dark:text-neutral-50 border border-neutral-200/30 dark:border-neutral-800/40 font-medium"
                       : "text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50/10 dark:hover:bg-neutral-900/10 hover:text-neutral-800 dark:hover:text-neutral-200"
@@ -72,11 +72,11 @@ export default function Sidebar({ activeTab, onTabChange, sidebarOpen, onToggleS
         </div>
       </aside>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-black/80 border-t border-neutral-200/50 dark:border-neutral-900 text-neutral-500 py-3 px-6 flex items-center justify-around z-50 shadow-sm backdrop-blur-xl">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-black/80 border-t border-neutral-200/50 dark:border-neutral-900 text-neutral-500 py-3 px-6 flex items-center justify-around z-50 shadow-sm">
         {navItems.map((item) => {
           const isActive = activeTab === item.id
           return (
-            <button key={item.id} onClick={() => onTabChange(item.id)} aria-current={isActive ? "page" : undefined} className={`flex flex-col items-center gap-1 transition-all ${isActive ? "text-neutral-950 dark:text-white font-medium" : "text-neutral-400"}`}>
+            <button key={item.id} onClick={() => onTabChange(item.id)} aria-current={isActive ? "page" : undefined} className={`flex flex-col items-center gap-1 transition-colors ${isActive ? "text-neutral-950 dark:text-white font-medium" : "text-neutral-400"}`}>
               <div className="p-1 rounded-lg">{item.icon}</div>
               <span className="text-[8px] uppercase tracking-wider">{item.label}</span>
             </button>

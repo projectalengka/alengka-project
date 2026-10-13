@@ -1,5 +1,5 @@
 import type { Project, DashboardStats, MonthlyPoint, CategorySlice } from "@/types"
-import { monthKey, monthLabel, MONTH_NAMES_ID } from "@/lib/utils"
+import { monthKey, monthLabel, MONTH_NAMES_ID, isOverdue } from "@/lib/utils"
 
 /**
  * Perhitungan laporan.
@@ -12,7 +12,6 @@ import { monthKey, monthLabel, MONTH_NAMES_ID } from "@/lib/utils"
 export function computeStats(projects: Project[]): DashboardStats {
   const done = projects.filter((p) => p.status === "Done")
   const pipeline = projects.filter((p) => p.status === "On Progress" || p.status === "Revisi")
-  const now = Date.now()
   return {
     total: projects.length,
     onProgress: projects.filter((p) => p.status === "On Progress").length,
@@ -21,7 +20,14 @@ export function computeStats(projects: Project[]): DashboardStats {
     cancel: projects.filter((p) => p.status === "Cancel").length,
     totalIncome: done.reduce((sum, p) => sum + p.price, 0),
     pipelineIncome: pipeline.reduce((sum, p) => sum + p.price, 0),
-    overdue: pipeline.filter((p) => new Date(p.deadline).getTime() < now).length,
+    /*
+     * Memakai `isOverdue` yang SAMA dengan yang dipakai lencana baris tabel.
+     * Sebelumnya di sini membandingkan stempel waktu (`deadline < Date.now()`),
+     * sedangkan tabel membandingkan tanggal di zona WIB — dua definisi berbeda,
+     * sehingga angka "N proyek lewat deadline" di header bisa tidak cocok
+     * dengan jumlah baris yang benar-benar disorot kuning.
+     */
+    overdue: pipeline.filter((p) => isOverdue(p.deadline)).length,
   }
 }
 

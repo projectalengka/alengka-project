@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import type { Project, Category } from "@/types"
 import { X, Printer, Landmark, Loader2, Edit3, Plus, Minus } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { replaceOklchColors } from "@/lib/print-colors"
+import { useEscape } from "@/lib/use-escape"
 
 /** Tanggal lokal dalam format "YYYY-MM-DD" untuk <input type="date">. */
 function isoDate(offsetDays = 0): string {
@@ -63,19 +64,44 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
     return () => observer.disconnect()
   }, [isOpen])
 
+  /* Peta nama kategori untuk lookup O(1). Sebelumnya `categories.find()`
+     dijalankan sekali per baris invoice. */
+  const categoryNameMap = useMemo(
+    () => new Map(categories.map((c) => [c.id, c.name])),
+    [categories],
+  )
+
+  /**
+   * Kunci pilihan — hanya id, terurut.
+   *
+   * Ini memperbaiki bug nyata: efek inisialisasi dulu bergantung pada
+   * `selectedProjects` (IDENTITAS array). Setiap penyegaran data menghasilkan
+   * array baru, sehingga React menganggap "pilihan berubah" dan mengosongkan
+   * tanggal serta nama klien yang baru saja diketik. Sekarang inisialisasi
+   * hanya berjalan ketika SUSUNAN pilihan benar-benar berbeda.
+   */
+  const selectionKey = useMemo(
+    () => selectedProjects.map((p) => p.id).slice().sort().join("|"),
+    [selectedProjects],
+  )
+
   useEffect(() => {
-    if (selectedProjects.length > 0) {
-      const uniqueClients = Array.from(new Set(selectedProjects.map((p) => p.clientName)))
-      setClientName(uniqueClients.length === 1 ? uniqueClients[0] : uniqueClients.join(", "))
-      // Nomor invoice hanya dibuat bila masih kosong — kalau tidak, mengubah
-      // pilihan saat modal terbuka akan menimpa nomor yang sudah diedit.
-      setInvoiceNo((prev) =>
-        prev || `INV-${isoDate().replaceAll("-", "")}-${Math.floor(100 + Math.random() * 900)}`,
-      )
-      setIssueDate(isoDate())
-      setDueDate(isoDate(14))
-    }
-  }, [selectedProjects, isOpen])
+    if (selectedProjects.length === 0) return
+    const uniqueClients = Array.from(new Set(selectedProjects.map((p) => p.clientName)))
+    setClientName(uniqueClients.length === 1 ? uniqueClients[0] : uniqueClients.join(", "))
+    // Nomor invoice hanya dibuat bila masih kosong — kalau tidak, mengubah
+    // pilihan saat modal terbuka akan menimpa nomor yang sudah diedit.
+    setInvoiceNo((prev) =>
+      prev || `INV-${isoDate().replaceAll("-", "")}-${Math.floor(100 + Math.random() * 900)}`,
+    )
+    setIssueDate(isoDate())
+    setDueDate(isoDate(14))
+    // Sengaja TIDAK memakai `selectedProjects` sebagai dependensi (lihat catatan
+    // di atas). `selectionKey` sudah mewakili perubahan yang relevan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey, isOpen])
+
+  useEscape(isOpen, onClose)
 
   if (!isOpen || selectedProjects.length === 0) return null
 
@@ -88,10 +114,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
   const safeDiscount = Math.min(Math.max(0, discountAmount), maxDiscount)
   const totalAmount = subtotal + taxAmount - safeDiscount
 
-  const getCategoryName = (catId: string) => {
-    const found = categories.find((c) => c.id === catId)
-    return found ? found.name : catId
-  }
+  const getCategoryName = (catId: string) => categoryNameMap.get(catId) ?? catId
 
   const handlePrint = async () => {
     setIsGeneratingPdf(true)
@@ -190,11 +213,11 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
   }
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-0 md:p-4 overflow-y-auto bg-[#09090b]/40 dark:bg-black/60 backdrop-blur-md">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-0 md:p-4 overflow-y-auto bg-[#09090b]/40 dark:bg-black/60">
       <div className="relative bg-neutral-50 dark:bg-neutral-950 w-full max-w-5xl h-full md:h-auto md:max-h-[94vh] flex flex-col md:rounded-2xl border border-neutral-200 dark:border-neutral-900 shadow-2xl overflow-hidden">
 
         {/* === HEADER === */}
-        <div className="flex items-center justify-between px-5 md:px-7 py-3.5 border-b border-neutral-200 dark:border-neutral-900 bg-white dark:bg-[#0d0d0f]/80 backdrop-blur-md sticky top-0 z-10 print:hidden">
+        <div className="flex items-center justify-between px-5 md:px-7 py-3.5 border-b border-neutral-200 dark:border-neutral-900 bg-white dark:bg-[#0d0d0f]/80 sticky top-0 z-10 print:hidden">
           <div className="flex items-center gap-3">
             <div className="p-1.5 px-2.5 bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 text-[9px] font-semibold rounded-md uppercase tracking-wider shadow-xs">
               DS
@@ -213,7 +236,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
             <button
               onClick={handlePrint}
               disabled={isGeneratingPdf}
-              className="px-4 py-2 bg-neutral-950 dark:bg-white hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-60 text-white dark:text-neutral-950 font-semibold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer active:scale-[0.97] shadow-xs"
+              className="px-4 py-2 bg-neutral-950 dark:bg-white hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-60 text-white dark:text-neutral-950 font-semibold rounded-xl text-xs flex items-center gap-2 transition cursor-pointer active:scale-[0.97] shadow-xs"
             >
               {isGeneratingPdf ? (
                 <>
@@ -229,7 +252,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
             </button>
             <button
               onClick={onClose}
-              className="p-2 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-xl transition-all cursor-pointer"
+              className="p-2 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-xl transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -251,7 +274,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
               <div className="space-y-1">
                 <label className="block text-[8.5px] uppercase font-semibold tracking-[0.15em] text-neutral-450 dark:text-neutral-500">No. Invoice</label>
                 <input type="text" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)}
-                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all font-mono" />
+                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors font-mono" />
               </div>
 
               {/* Dates */}
@@ -259,12 +282,12 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                 <div className="space-y-1">
                   <label className="block text-[8.5px] uppercase font-semibold tracking-[0.15em] text-neutral-450 dark:text-neutral-500">Tanggal</label>
                   <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)}
-                    className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all" />
+                    className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors" />
                 </div>
                 <div className="space-y-1">
                   <label className="block text-[8.5px] uppercase font-semibold tracking-[0.15em] text-neutral-450 dark:text-neutral-500">Jatuh Tempo</label>
                   <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all" />
+                    className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors" />
                 </div>
               </div>
 
@@ -272,17 +295,17 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
               <div className="space-y-1.5">
                 <label className="block text-[8.5px] uppercase font-semibold tracking-[0.15em] text-neutral-450 dark:text-neutral-500">Nama Klien</label>
                 <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)}
-                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all" />
+                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors" />
               </div>
               <div className="space-y-1.5">
                 <label className="block text-[8.5px] uppercase font-semibold tracking-[0.15em] text-neutral-450 dark:text-neutral-500">Kontak Klien</label>
                 <input type="text" value={clientContact} onChange={(e) => setClientContact(e.target.value)} placeholder="Email / Telepon"
-                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all" />
+                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors" />
               </div>
               <div className="space-y-1.5">
                 <label className="block text-[8.5px] uppercase font-semibold tracking-[0.15em] text-neutral-450 dark:text-neutral-500">Alamat Klien</label>
                 <textarea value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} rows={2} placeholder="Opsional"
-                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all resize-none" />
+                  className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors resize-none" />
               </div>
 
               <hr className="border-neutral-100 dark:border-neutral-900/60" />
@@ -297,7 +320,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => setTaxPercent(Math.max(0, taxPercent - 1))}
-                      className="p-1 rounded-md bg-white dark:bg-[#0d0d0f] border border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-all cursor-pointer"
+                      className="p-1 rounded-md bg-white dark:bg-[#0d0d0f] border border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors cursor-pointer"
                     >
                       <Minus className="w-3 h-3" />
                     </button>
@@ -306,7 +329,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                     </span>
                     <button
                       onClick={() => setTaxPercent(Math.min(50, taxPercent + 1))}
-                      className="p-1 rounded-md bg-white dark:bg-[#0d0d0f] border border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-all cursor-pointer"
+                      className="p-1 rounded-md bg-white dark:bg-[#0d0d0f] border border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
                     </button>
@@ -318,7 +341,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                 <div className="space-y-1">
                   <label className="block text-[9.5px] font-medium text-neutral-500 dark:text-neutral-400">Diskon (Rp)</label>
                   <input type="number" value={discountAmount || ""} onChange={(e) => setDiscountAmount(Math.max(0, Number(e.target.value)) || 0)} min="0"
-                    className="w-full bg-white dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-right text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all" />
+                    className="w-full bg-white dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-right text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors" />
                   {discountAmount > maxDiscount && (
                     <p className="text-[9.5px] text-amber-600 dark:text-amber-400 leading-snug">
                       Diskon dibatasi {formatCurrency(maxDiscount)} supaya total tidak negatif.

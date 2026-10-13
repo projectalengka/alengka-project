@@ -42,7 +42,7 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
         <div className="lg:col-span-4 bg-white dark:bg-[#0d0d0f]/50 border border-neutral-200 dark:border-neutral-900/60 p-6 sm:p-8 rounded-xl flex flex-col items-center text-center shadow-xs">
           <div className="w-full flex items-center justify-between">
             <span className="text-[9px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-[0.15em]">Progres</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           </div>
 
           <div className="my-10 relative flex items-center justify-center w-48 h-48">
@@ -156,7 +156,7 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
                       }
                       return (
                         <>
-                          <path d={`${dPath} L 1100,150 L 0,150 Z`} fill="url(#incomeShadow)" className="transition-all duration-500" />
+                          <path d={`${dPath} L 1100,150 L 0,150 Z`} fill="url(#incomeShadow)" />
                           <path d={dPath} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                           {points.map((pt, idx) => (
                             <g key={idx}>
@@ -166,7 +166,7 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
                               <circle
                                 cx={pt.x} cy={pt.y} r="3"
                                 fill="currentColor"
-                                className="cursor-pointer transition-all duration-150"
+                                className="cursor-pointer transition-transform duration-150"
                                 onMouseEnter={() => setHoveredMonth(idx)}
                                 onMouseLeave={() => setHoveredMonth(null)}
                                 style={{ transform: hoveredMonth === idx ? "scale(1.6)" : "scale(1)", transformOrigin: `${pt.x}px ${pt.y}px` }}
@@ -189,7 +189,7 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
 
               {hoveredMonth !== null && (
                 <div
-                  className="absolute z-40 bg-white/95 dark:bg-[#121214]/95 border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2.5 shadow-xl pointer-events-none backdrop-blur-md animate-fade-in"
+                  className="absolute z-40 bg-white/95 dark:bg-[#121214]/95 border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2.5 shadow-xl pointer-events-none animate-fade-in"
                   style={{ left: `${((hoveredMonth + 0.5) / monthlyData.length) * 100}%`, transform: "translateX(-50%)", bottom: "35%" }}
                 >
                   <div className="text-[9px] text-neutral-400 dark:text-neutral-500 tracking-wider uppercase font-medium">{monthlyData[hoveredMonth].name} {yearLabel}</div>
@@ -250,7 +250,7 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
                   </div>
                 </div>
                 <div className="w-full h-1.5 bg-neutral-100 dark:bg-neutral-900 rounded-full overflow-hidden">
-                  <div className="h-full bg-neutral-950 dark:bg-[#f5f5f7] rounded-full transition-all duration-700" style={{ width: `${Math.min(slice.ratio, 100)}%` }} />
+                  <div className="h-full bg-neutral-950 dark:bg-[#f5f5f7] rounded-full transition-[width] duration-300 ease-out" style={{ width: `${Math.min(slice.ratio, 100)}%` }} />
                 </div>
                 <span className="text-[9.5px] text-neutral-400 dark:text-neutral-500 font-mono block">{formatCurrency(slice.totalValue)}</span>
               </div>

@@ -35,7 +35,7 @@ export default function StatsGrid({ stats }: StatsGridProps) {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 pl-1">
         {cards.map((item, idx) => (
-          <div key={idx} className="flex flex-col justify-between h-28 bg-white dark:bg-[#0d0d0f]/30 border border-neutral-200/60 dark:border-neutral-900/40 rounded-xl p-5 group shadow-xs hover:border-neutral-300 dark:hover:border-neutral-800 transition-all duration-300">
+          <div key={idx} className="flex flex-col justify-between h-28 bg-white dark:bg-[#0d0d0f]/30 border border-neutral-200/60 dark:border-neutral-900/40 rounded-xl p-5 group shadow-xs hover:border-neutral-300 dark:hover:border-neutral-800 transition-colors duration-200">
             <div className="space-y-1">
               <div className="flex items-center gap-1.5 text-neutral-400 dark:text-neutral-500">
                 {item.icon}

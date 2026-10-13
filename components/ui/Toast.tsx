@@ -30,7 +30,7 @@ export default function Toast({ message, type = "success", onClose, duration = 4
   return (
     <div
       role="alert"
-      className="fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3.5 border border-neutral-200/50 dark:border-neutral-850 rounded-lg shadow-xl backdrop-blur-xl animate-fade-in max-w-sm bg-white/90 dark:bg-neutral-950/90"
+      className="fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3.5 border border-neutral-200/50 dark:border-neutral-850 rounded-lg shadow-xl animate-fade-in max-w-sm bg-white dark:bg-neutral-950"
     >
       <div className="flex-shrink-0">{icon}</div>
       <div className="flex-1 text-xs font-medium font-sans leading-relaxed text-neutral-800 dark:text-neutral-100">{message}</div>
@@ -38,7 +38,7 @@ export default function Toast({ message, type = "success", onClose, duration = 4
         <X className="w-3.5 h-3.5" />
       </button>
       <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-neutral-100 dark:bg-neutral-900 rounded-b-lg overflow-hidden">
-        <div className={`h-full ${progress}`} style={{ animation: `shrink ${duration}ms linear forwards` }} />
+        <div className={`h-full origin-left ${progress}`} style={{ animation: `shrink ${duration}ms linear forwards` }} />
       </div>
     </div>
   )

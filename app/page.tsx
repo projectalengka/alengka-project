@@ -25,9 +25,12 @@ const ProjectForm = dynamic(() => import("@/components/projects/ProjectForm"), {
   ssr: false,
 })
 
+/* Kerangka statis. Dulu memakai denyut tak berujung (pulse) yang melukis ulang
+   tiga blok ini terus-menerus. Kerangka statis memberi sinyal "sedang memuat"
+   yang sama tanpa biaya render. */
 function TabSkeleton() {
   return (
-    <div className="space-y-4 animate-pulse">
+    <div className="space-y-4">
       <div className="h-6 w-40 bg-neutral-100 dark:bg-neutral-900 rounded" />
       <div className="h-48 bg-neutral-100/70 dark:bg-neutral-900/50 rounded-xl" />
       <div className="h-32 bg-neutral-100/50 dark:bg-neutral-900/30 rounded-xl" />
@@ -51,6 +54,12 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
+  /* Modal invoice hidup di dalam ProjectList, jadi halaman tidak tahu kapan ia
+     terbuka. Tanpa penanda ini, poll 30 detik tetap berjalan selagi pengguna
+     mengisi invoice — dan karena daftar proyek ikut disegarkan, modal invoice
+     menganggap "pilihan berubah" lalu mengosongkan tanggal/nama klien yang
+     baru saja diketik. */
+  const [invoiceOpen, setInvoiceOpen] = useState(false)
   const [projectToEdit, setProjectToEdit] = useState<Project | null>(null)
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [toast, setToast] = useState<{ message: string; type?: ToastType } | null>(null)
@@ -63,7 +72,9 @@ export default function Home() {
   // Dibaca di dalam interval tanpa menjadikannya dependency -> interval tidak
   // ikut dibongkar-pasang setiap kali modal dibuka/ditutup.
   const uiBusyRef = useRef(false)
-  useEffect(() => { uiBusyRef.current = isModalOpen || isConfirmOpen }, [isModalOpen, isConfirmOpen])
+  useEffect(() => {
+    uiBusyRef.current = isModalOpen || isConfirmOpen || invoiceOpen
+  }, [isModalOpen, isConfirmOpen, invoiceOpen])
 
   /* ---------------------------------------------------------------- tema --- */
   useEffect(() => {
@@ -245,7 +256,7 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-[#f5f5f7] dark:bg-[#09090b] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 rounded bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 flex items-center justify-center font-sans italic text-xs font-medium uppercase animate-pulse">ds</div>
+          <div className="w-6 h-6 rounded bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 flex items-center justify-center font-sans italic text-xs font-medium uppercase">ds</div>
           <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono tracking-widest uppercase">Memuat...</span>
         </div>
       </div>
@@ -254,7 +265,7 @@ export default function Home() {
 
   return (
     <ErrorBoundary>
-    <div className="min-h-screen bg-[#f5f5f7] dark:bg-[#09090b] text-[#1d1d1f] dark:text-[#f5f5f7] flex flex-col md:flex-row font-sans transition-colors duration-500">
+    <div className="min-h-screen bg-[#f5f5f7] dark:bg-[#09090b] text-[#1d1d1f] dark:text-[#f5f5f7] flex flex-col md:flex-row font-sans transition-colors duration-200">
       <Sidebar
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -262,11 +273,11 @@ export default function Home() {
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
       />
 
-      <main className={`flex-1 p-4 sm:p-6 lg:p-8 w-full space-y-6 overflow-y-auto mb-16 md:mb-0 transition-all duration-300 mx-auto ${sidebarOpen ? "max-w-6xl" : "max-w-7xl"}`}>
+      <main className={`flex-1 p-4 sm:p-6 lg:p-8 w-full space-y-6 overflow-y-auto mb-16 md:mb-0 transition-[max-width] duration-200 ease-out mx-auto ${sidebarOpen ? "max-w-6xl" : "max-w-7xl"}`}>
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 border-b border-neutral-200/30 dark:border-neutral-900 pb-6">
           <div>
             <div className="flex items-center gap-2" title={lastSync ? `Terakhir sinkron: ${lastSync}` : undefined}>
-              <span className={`w-1.5 h-1.5 rounded-full ${loadError ? "bg-red-500" : "bg-emerald-500 animate-pulse"}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${loadError ? "bg-red-500" : "bg-emerald-500"}`} />
               <span className="text-[8.5px] text-neutral-400 dark:text-neutral-500 font-mono uppercase tracking-[0.2em] font-medium">
                 {loadError ? "Offline" : "Live"}
               </span>
@@ -291,13 +302,13 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            <button onClick={() => setDarkMode((v) => !v)} aria-label="Ganti tema" className="p-2 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-all cursor-pointer bg-neutral-100/10 hover:bg-neutral-100/30 dark:bg-neutral-900/10 dark:hover:bg-neutral-900/30">
+            <button onClick={() => setDarkMode((v) => !v)} aria-label="Ganti tema" className="p-2 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-colors cursor-pointer bg-neutral-100/10 hover:bg-neutral-100/30 dark:bg-neutral-900/10 dark:hover:bg-neutral-900/30">
               {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-neutral-500" />}
             </button>
-            <button onClick={() => loadData({ silent: true })} className="px-3 py-1.5 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-100/30 dark:hover:bg-neutral-900/30">
+            <button onClick={() => loadData({ silent: true })} className="px-3 py-1.5 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-100/30 dark:hover:bg-neutral-900/30">
               <RefreshCw className="w-3 h-3" />Refresh
             </button>
-            <button onClick={() => { setProjectToEdit(null); setIsModalOpen(true) }} className="px-4 py-1.5 bg-neutral-950 dark:bg-neutral-100 hover:bg-neutral-800 dark:hover:bg-white text-white dark:text-neutral-950 font-medium rounded-full text-xs flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-[0.98]">
+            <button onClick={() => { setProjectToEdit(null); setIsModalOpen(true) }} className="px-4 py-1.5 bg-neutral-950 dark:bg-neutral-100 hover:bg-neutral-800 dark:hover:bg-white text-white dark:text-neutral-950 font-medium rounded-full text-xs flex items-center gap-2 transition cursor-pointer shadow-xs active:scale-[0.98]">
               <PlusCircle className="w-3.5 h-3.5" />Baru
             </button>
           </div>
@@ -312,7 +323,7 @@ export default function Home() {
           </div>
         )}
 
-        <div className="space-y-6 min-h-[50vh] transition-all duration-300">
+        <div className="space-y-6 min-h-[50vh]">
           {activeTab === "dashboard" && (
             <div className="space-y-6 animate-fade-in">
               <StatsGrid stats={stats} />
@@ -327,7 +338,7 @@ export default function Home() {
                       Lihat Semua &rarr;
                     </button>
                   </div>
-                  <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} isDashboard />
+                  <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} onInvoiceOpenChange={setInvoiceOpen} isDashboard />
                 </div>
               </div>
             </div>
@@ -339,7 +350,7 @@ export default function Home() {
                 <h3 className="text-[10px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-[0.2em]">Semua Proyek</h3>
                 <p className="text-xs text-neutral-450 dark:text-neutral-400 mt-0.5">Semua proyek yang pernah dikerjain.</p>
               </div>
-              <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} />
+              <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} onInvoiceOpenChange={setInvoiceOpen} />
             </div>
           )}
 
