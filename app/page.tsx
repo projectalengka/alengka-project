@@ -105,13 +105,35 @@ export default function Home() {
   const loadData = useCallback(async (opts?: { showLoader?: boolean; silent?: boolean }) => {
     const { showLoader = false, silent = false } = opts ?? {}
     if (showLoader) setLoading(true)
-    const res = await getDashboardData()
-    if (res.ok) {
-      applyPayload(res.data)
-    } else if (!silent) {
-      setLoadError(res.error)
+    /*
+     * try/catch WAJIB ada di sini.
+     *
+     * Action memang dirancang mengembalikan ActionResult, tetapi ia tetap bisa
+     * MELEMPAR tanpa sempat mengembalikan apa pun — koneksi database putus,
+     * fungsi serverless gagal cold-start, atau jaringan pengguna terputus.
+     * Dulu tidak ada penanganan, sehingga `setLoading(false)` tidak pernah
+     * dijalankan dan halaman menggantung selamanya di layar "Memuat...",
+     * tanpa pesan apa pun. Terbukti terjadi saat deploy pertama.
+     */
+    try {
+      const res = await getDashboardData()
+      if (res.ok) {
+        applyPayload(res.data)
+      } else if (!silent) {
+        setLoadError(res.error)
+      }
+    } catch (e) {
+      if (!silent) {
+        setLoadError(
+          e instanceof Error
+            ? `Gagal memuat data: ${e.message}`
+            : "Gagal memuat data. Periksa koneksi lalu coba lagi.",
+        )
+      }
+    } finally {
+      // Selalu dijalankan, apa pun yang terjadi — ini yang mencegah layar macet.
+      if (showLoader) setLoading(false)
     }
-    if (showLoader) setLoading(false)
   }, [applyPayload])
 
   useEffect(() => { loadData({ showLoader: true }) }, [loadData])

@@ -12,3 +12,6 @@ tsconfig.tsbuildinfo
 .env*.local
 .env
 !.env.example
+
+# Vercel CLI (tautan proyek lokal, bukan bagian dari kode)
+.vercel
