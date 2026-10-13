@@ -286,7 +286,11 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-[#f7f7f8] dark:bg-[#08080a] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center font-bold text-[13px]">
+          {/* Padding asimetris: koreksi optis yang sama seperti mark di sidebar. */}
+          <div
+            className="w-9 h-9 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center font-bold text-[13px]"
+            style={{ paddingTop: "1.5px", paddingRight: "0.7px" }}
+          >
             DS
           </div>
           <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-medium">Memuat data...</span>

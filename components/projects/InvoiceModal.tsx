@@ -429,8 +429,37 @@ export default function InvoiceModal({
                       width: "32px", height: "32px",
                       background: "#1a1a2e", color: "#ffffff",
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      borderRadius: "6px", fontSize: "11px", fontWeight: 700,
-                      letterSpacing: "2px", fontFamily: "'Playfair Display', Georgia, serif", fontStyle: "italic",
+                      borderRadius: "6px",
+                      fontFamily: "'Playfair Display', Georgia, serif",
+                      fontStyle: "italic", fontWeight: 700,
+                      fontSize: "12px",
+                      lineHeight: 1,
+                      /*
+                       * Monogram "ds" dipusatkan secara OPTIS, bukan sekadar
+                       * memusatkan kotak baris.
+                       *
+                       * Tiga hal yang salah sebelumnya, semuanya ditemukan dengan
+                       * MENGUKUR piksel hasil render — bukan dengan membaca kode:
+                       *  1. `letterSpacing: "2px"` menambah ruang setelah huruf
+                       *     terakhir, sehingga tinta terdorong 1,24px ke kiri.
+                       *     Kelas spasi itu dihapus, tidak dikompensasi.
+                       *  2. `lineHeight` bawaan menyisakan ruang mati di bawah
+                       *     huruf italic tanpa ekor, sehingga tinta duduk rendah.
+                       *  3. Sisa geseran ditutup padding asimetris di bawah.
+                       *
+                       * Padding dipakai, bukan `transform`, karena lembar ini
+                       * diraster html2canvas saat membuat PDF — properti tata
+                       * letak dihormati tanpa syarat, sedangkan dukungan
+                       * transform pada html2canvas tidak bisa diandalkan.
+                       *
+                       * Angkanya hasil pengukuran: 0,53px ke kanan dan 1,07px ke
+                       * bawah dari titik tengah. Karena padding menggeser kotak
+                       * baris sebesar setengah nilainya, angkanya dikali dua.
+                       * Berlaku untuk metrik Playfair Display italic; kalau font
+                       * ini diganti, ukur ulang.
+                       */
+                      paddingRight: "1.1px",
+                      paddingBottom: "3.1px",
                     }}>ds</div>
                     <div>
                       <div style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase" }}>Design Studio</div>

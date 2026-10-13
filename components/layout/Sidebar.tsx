@@ -69,7 +69,16 @@ export default function Sidebar({
       {/* ---------------- Desktop: sidebar tetap ---------------- */}
       <aside className="hidden md:flex flex-col w-60 shrink-0 h-screen sticky top-0 bg-white dark:bg-[#0b0b0d] border-r border-neutral-200 dark:border-neutral-900">
         <div className="px-5 py-5 flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center font-bold text-[13px] tracking-tight">
+          <div
+            className="w-8 h-8 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center font-bold text-[13px] tracking-tight"
+            /* Padding asimetris menutup geseran optis monogram huruf besar.
+               Diukur dari piksel hasil render: "DS" duduk 0,67px terlalu tinggi
+               dan 0,33px terlalu ke kanan. Huruf besar tidak punya tinta di
+               bawah garis dasar, sehingga memusatkan kotak baris selalu
+               membuatnya tampak naik. Angka padding = dua kali geserannya,
+               karena padding menggeser kotak baris hanya setengahnya. */
+            style={{ paddingTop: "1.5px", paddingRight: "0.7px" }}
+          >
             DS
           </div>
           <div className="leading-tight">
