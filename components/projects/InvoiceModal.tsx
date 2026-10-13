@@ -4,6 +4,14 @@ import { useState, useEffect, useRef } from "react"
 import type { Project, Category } from "@/types"
 import { X, Printer, Landmark, Loader2, Edit3, Plus, Minus } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
+import { replaceOklchColors } from "@/lib/print-colors"
+
+/** Tanggal lokal dalam format "YYYY-MM-DD" untuk <input type="date">. */
+function isoDate(offsetDays = 0): string {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
 
 interface InvoiceModalProps {
   isOpen: boolean
@@ -13,9 +21,16 @@ interface InvoiceModalProps {
 }
 
 export default function InvoiceModal({ isOpen, onClose, selectedProjects, categories }: InvoiceModalProps) {
-  const [invoiceNo, setInvoiceNo] = useState("")
-  const [issueDate, setIssueDate] = useState("")
-  const [dueDate, setDueDate] = useState("")
+  /* Nilai awal langsung diisi (lazy initializer), bukan "". Dulu state tanggal
+     mulai dari "" dan baru diisi oleh useEffect SETELAH render pertama —
+     pada render itu formatDate("") melempar RangeError dan seluruh halaman
+     jatuh ke layar "Terjadi Kesalahan". formatDate kini juga sudah aman, tapi
+     mengisi nilai yang benar sejak awal sekaligus menghilangkan kedipan "—". */
+  const [invoiceNo, setInvoiceNo] = useState(
+    () => `INV-${isoDate().replaceAll("-", "")}-${Math.floor(100 + Math.random() * 900)}`,
+  )
+  const [issueDate, setIssueDate] = useState(() => isoDate())
+  const [dueDate, setDueDate] = useState(() => isoDate(14))
   const [clientName, setClientName] = useState("")
   const [clientContact, setClientContact] = useState("")
   const [clientAddress, setClientAddress] = useState("")
@@ -52,14 +67,13 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
     if (selectedProjects.length > 0) {
       const uniqueClients = Array.from(new Set(selectedProjects.map((p) => p.clientName)))
       setClientName(uniqueClients.length === 1 ? uniqueClients[0] : uniqueClients.join(", "))
-      const today = new Date()
-      const y = today.getFullYear()
-      const m = String(today.getMonth() + 1).padStart(2, "0")
-      const d = String(today.getDate()).padStart(2, "0")
-      setInvoiceNo(`INV-${y}${m}${d}-${Math.floor(100 + Math.random() * 900)}`)
-      setIssueDate(`${y}-${m}-${d}`)
-      const due = new Date(); due.setDate(due.getDate() + 14)
-      setDueDate(`${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`)
+      // Nomor invoice hanya dibuat bila masih kosong — kalau tidak, mengubah
+      // pilihan saat modal terbuka akan menimpa nomor yang sudah diedit.
+      setInvoiceNo((prev) =>
+        prev || `INV-${isoDate().replaceAll("-", "")}-${Math.floor(100 + Math.random() * 900)}`,
+      )
+      setIssueDate(isoDate())
+      setDueDate(isoDate(14))
     }
   }, [selectedProjects, isOpen])
 
@@ -102,7 +116,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
         backgroundColor: "#ffffff",
         logging: false,
         onclone: (doc) => {
-          const el = doc.querySelector(".printable-invoice-sheet") as HTMLElement
+          const el = doc.querySelector(".printable-invoice-sheet") as HTMLElement | null
           if (el) {
             el.style.transform = "none"
             el.style.position = "static"
@@ -110,6 +124,20 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
             el.style.minHeight = "297mm"
             el.style.maxHeight = "none"
           }
+          /* WAJIB — ini yang membuat "Cetak PDF" dulu tidak pernah jalan.
+
+             Tailwind v4 menyusun seluruh paletnya dalam ruang warna oklch().
+             html2canvas tidak mengenali fungsi warna itu dan MELEMPAR
+             "Attempting to parse an unsupported color function" begitu bertemu
+             satu nilai oklch — baik itu class di lembar invoice itu sendiri
+             (bg-white, text-neutral-900, border-neutral-200...) maupun di
+             rantai induknya. Tanpa konversi di bawah, setiap klik "Cetak PDF"
+             gagal dan jatuh ke cabang catch -> window.print() tanpa penjelasan.
+
+             replaceOklchColors menelusuri seluruh badan dokumen kloning
+             (lembar + semua induknya) dan menulis padanan rgb sebagai inline
+             style, yang menimpa class Tailwind pada salinan itu. */
+          replaceOklchColors(doc.body)
         },
       })
 

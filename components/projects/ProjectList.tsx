@@ -397,7 +397,10 @@ export default function ProjectList({
       )}
 
       {selectedIds.length > 0 && !isDashboard && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] w-[calc(100%-2rem)] max-w-lg bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 rounded-xl p-4 shadow-2xl flex items-center justify-between gap-4 animate-slide-up">
+        /* bottom-20 di mobile: bilah ini dulu bertumpuk dengan bottom nav
+           (fixed bottom-0), sehingga keempat tombol navigasi tidak bisa
+           diklik selama ada proyek terpilih. Di desktop bottom-6 seperti biasa. */
+        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[90] w-[calc(100%-2rem)] max-w-lg bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 rounded-xl p-4 shadow-2xl flex items-center justify-between gap-4 animate-slide-up">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-neutral-800 dark:bg-neutral-200 text-white dark:text-neutral-950 rounded-lg"><FileSpreadsheet className="w-4 h-4 text-emerald-400 dark:text-emerald-600" /></div>
             <div className="flex flex-col">

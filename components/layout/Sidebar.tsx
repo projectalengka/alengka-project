@@ -43,6 +43,7 @@ export default function Sidebar({ activeTab, onTabChange, sidebarOpen, onToggleS
                 <button
                   key={item.id}
                   onClick={() => onTabChange(item.id)}
+                  aria-current={isActive ? "page" : undefined}
                   className={`w-full flex items-center px-3 py-2.5 rounded-lg transition-all text-xs ${
                     isActive
                       ? "bg-neutral-100/60 dark:bg-neutral-900/60 text-neutral-950 dark:text-neutral-50 border border-neutral-200/30 dark:border-neutral-800/40 font-medium"
@@ -75,7 +76,7 @@ export default function Sidebar({ activeTab, onTabChange, sidebarOpen, onToggleS
         {navItems.map((item) => {
           const isActive = activeTab === item.id
           return (
-            <button key={item.id} onClick={() => onTabChange(item.id)} className={`flex flex-col items-center gap-1 transition-all ${isActive ? "text-neutral-950 dark:text-white font-medium" : "text-neutral-400"}`}>
+            <button key={item.id} onClick={() => onTabChange(item.id)} aria-current={isActive ? "page" : undefined} className={`flex flex-col items-center gap-1 transition-all ${isActive ? "text-neutral-950 dark:text-white font-medium" : "text-neutral-400"}`}>
               <div className="p-1 rounded-lg">{item.icon}</div>
               <span className="text-[8px] uppercase tracking-wider">{item.label}</span>
             </button>

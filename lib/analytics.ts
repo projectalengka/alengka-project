@@ -43,6 +43,9 @@ export function buildMonthlySeries(
 
   for (const p of projects) {
     const key = monthKey(p.createdAt)
+    // monthKey mengembalikan null untuk tanggal rusak; lewati, jangan masukkan
+    // ke bucket mana pun. Sebelumnya nilai rusak akan menjatuhkan halaman.
+    if (!key) continue
     const bucket = buckets.get(key)
     if (!bucket) continue // di luar tahun yang ditampilkan
     bucket.count += 1
