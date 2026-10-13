@@ -33,21 +33,38 @@ const categories = [
   { id: "Motion Design", name: "Motion Graphic Grafis", iconName: "Video" },
 ]
 
+/** Klien kini data tersendiri, lengkap dengan kontak & alamat untuk invoice. */
+const clients = [
+  { key: "nexa", name: "Nexa Tech Solutions", contact: "halo@nexatech.id | +62 811-2233-4455", address: "Menara Sentraya Lt. 18, Jl. Iskandarsyah Raya No. 1A, Jakarta Selatan 12160" },
+  { key: "velo", name: "Velo Athletic Co.", contact: "design@veloathletic.co | +62 812-8899-1010", address: "Jl. Raya Kertajaya Indah No. 42, Surabaya 60116" },
+  { key: "krypton", name: "Krypton Labs", contact: "ops@kryptonlabs.io", address: "CoHive Coworking, Jl. Wolter Monginsidi No. 88, Jakarta Selatan 12180" },
+  { key: "apex", name: "Apex Esports", contact: "manager@apexesports.gg | +62 813-5566-7788", address: "Ruko Golden Boulevard Blok B No. 7, Tangerang 15310" },
+  { key: "elysian", name: "Elysian Wear", contact: "studio@elysianwear.com", address: "Jl. Cihampelas No. 120, Bandung 40131" },
+  { key: "symphony", name: "Symphony Hall", contact: "marketing@symphonyhall.id | +62 21-555-0199", address: "Jl. Gatot Subroto Kav. 21, Jakarta Selatan 12930" },
+  { key: "arcane", name: "Arcane Brew Co.", contact: "hello@arcanebrew.co", address: "Jl. Kemang Raya No. 15, Jakarta Selatan 12730" },
+  { key: "holo", name: "Holo Stream", contact: "partnership@holostream.tv", address: "Jl. Pangeran Antasari No. 55, Jakarta Selatan 12150" },
+  { key: "lumina", name: "Lumina Studio", contact: "hi@luminastudio.design | +62 817-4040-2020", address: "Jl. Danau Tamblingan No. 9, Denpasar 80228" },
+]
+
+/*
+ * Sebaran sengaja mencakup SEMUA tahap alur agar papan pipeline terlihat hidup:
+ * ada yang baru masuk, dikerjakan, revisi, selesai-belum-ditagih (siap ditagih),
+ * sudah ditagih, dan dibatalkan.
+ */
 const projects = [
   {
-    clientName: "Nexa Tech Solutions",
+    clientKey: "nexa",
     projectTitle: "Minimalist Brand Identity & Styleguide",
     categoryId: "Branding",
     price: 3200000,
     status: ProjectStatus.Done,
-    // Dijaga tetap di dalam tahun berjalan: grafik pendapatan hanya menghitung
-    // 12 bulan tahun ini, jadi proyek di tahun sebelumnya tidak akan terlihat.
     createdAt: daysAgo(268),
     deadline: daysAgo(240),
+    invoicedAt: daysAgo(230),
     notes: "Completed full branding suite including brand manual, color schemes, typography definition, and social media layout packs.",
   },
   {
-    clientName: "Velo Athletic Co.",
+    clientKey: "velo",
     projectTitle: "Premium Cycling Jersey Design v2",
     categoryId: "Jersey",
     price: 1800000,
@@ -57,7 +74,7 @@ const projects = [
     notes: "Reviewing layout of the chest stripes and corporate sponsor logos.",
   },
   {
-    clientName: "Krypton Labs",
+    clientKey: "krypton",
     projectTitle: "SaaS Analytics Dashboard UI",
     categoryId: "UI Design",
     price: 4900000,
@@ -67,7 +84,7 @@ const projects = [
     notes: "In progress of wireframing the central dashboard interactive widgets.",
   },
   {
-    clientName: "Apex Esports",
+    clientKey: "apex",
     projectTitle: "Championship Jersey & Team Hoodie Pack",
     categoryId: "Jersey",
     price: 2400000,
@@ -77,27 +94,29 @@ const projects = [
     notes: "Designing futuristic jersey with cybernetic neon patterns.",
   },
   {
-    clientName: "Elysian Wear",
+    clientKey: "elysian",
     projectTitle: "Summer Solstice Apparel Collection",
     categoryId: "Clothing",
     price: 3500000,
     status: ProjectStatus.Done,
     createdAt: daysAgo(203),
     deadline: daysAgo(171),
+    // sengaja BELUM ditagih -> muncul di kolom "Siap Ditagih"
     notes: "Designed a series of 5 minimalist screen-print graphics for heavyweight organic cotton t-shirts.",
   },
   {
-    clientName: "Symphony Hall",
+    clientKey: "symphony",
     projectTitle: "Annual Jazz Festival Poster Design",
     categoryId: "Poster",
     price: 1200000,
     status: ProjectStatus.Done,
     createdAt: daysAgo(152),
     deadline: daysAgo(131),
+    // sengaja BELUM ditagih -> muncul di kolom "Siap Ditagih"
     notes: "Created an abstract vector lithograph design mixing bold Swiss typography.",
   },
   {
-    clientName: "Arcane Brew Co.",
+    clientKey: "arcane",
     projectTitle: "Artisanal Coffee Packaging Illustration",
     categoryId: "Illustration",
     price: 2100000,
@@ -107,7 +126,7 @@ const projects = [
     notes: "Hand-drawn pen and ink illustration detailing mythical coffee shrubs.",
   },
   {
-    clientName: "Holo Stream",
+    clientKey: "holo",
     projectTitle: "App Launch - Web Animatic & Motion Intro",
     categoryId: "Motion Design",
     price: 4000000,
@@ -117,7 +136,7 @@ const projects = [
     notes: "Project cancelled by client due to funding constraints.",
   },
   {
-    clientName: "Lumina Studio",
+    clientKey: "lumina",
     projectTitle: "Corporate Logo Redesign Suite",
     categoryId: "Logo",
     price: 1500000,
@@ -125,6 +144,26 @@ const projects = [
     createdAt: daysAgo(37),
     deadline: daysAgo(11),
     notes: "Second iteration of the corporate emblem with warmer palette.",
+  },
+  {
+    clientKey: "nexa",
+    projectTitle: "Product Landing Page Redesign",
+    categoryId: "UI Design",
+    price: 2750000,
+    status: ProjectStatus.Masuk,
+    createdAt: daysAgo(4),
+    deadline: daysAhead(21),
+    notes: "Brief baru masuk. Menunggu materi konten dan aset produk dari klien.",
+  },
+  {
+    clientKey: "krypton",
+    projectTitle: "Design System & Component Library",
+    categoryId: "UI Design",
+    price: 5200000,
+    status: ProjectStatus.Masuk,
+    createdAt: daysAgo(2),
+    deadline: daysAhead(45),
+    notes: "Permintaan awal: token warna, tipografi, dan komponen dasar untuk tim internal.",
   },
 ]
 
@@ -134,16 +173,29 @@ async function main() {
   // Urutan penting: projects lebih dulu karena FK-nya ON DELETE RESTRICT.
   await prisma.project.deleteMany()
   await prisma.category.deleteMany()
+  await prisma.client.deleteMany()
 
   for (const cat of categories) {
     await prisma.category.create({ data: cat })
   }
 
-  for (const proj of projects) {
-    await prisma.project.create({ data: proj })
+  const clientIdByKey = new Map<string, string>()
+  for (const c of clients) {
+    const created = await prisma.client.create({
+      data: { id: crypto.randomUUID(), name: c.name, contact: c.contact, address: c.address },
+    })
+    clientIdByKey.set(c.key, created.id)
   }
 
-  console.log(`Seeded ${categories.length} categories and ${projects.length} projects.`)
+  for (const { clientKey, ...rest } of projects) {
+    const clientId = clientIdByKey.get(clientKey)
+    if (!clientId) throw new Error(`Klien tidak dikenal pada seed: ${clientKey}`)
+    await prisma.project.create({ data: { ...rest, clientId } })
+  }
+
+  console.log(
+    `Seeded ${categories.length} categories, ${clients.length} clients, ${projects.length} projects.`,
+  )
 }
 
 main()

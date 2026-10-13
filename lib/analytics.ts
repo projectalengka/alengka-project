@@ -11,32 +11,46 @@ import { monthKey, monthLabel, MONTH_NAMES_ID, isOverdue } from "@/lib/utils"
 
 export function computeStats(projects: Project[]): DashboardStats {
   const done = projects.filter((p) => p.status === "Done")
-  const pipeline = projects.filter((p) => p.status === "On Progress" || p.status === "Revisi")
+  // "Siap ditagih" = sudah selesai tetapi belum pernah masuk invoice.
+  const siapDitagih = done.filter((p) => !p.invoicedAt)
+  // Sudah ditagih, apa pun statusnya sekarang (biasanya tetap Done).
+  const sudahDitagih = projects.filter((p) => p.invoicedAt !== null)
+  const pipeline = projects.filter(
+    (p) => p.status === "Masuk" || p.status === "On Progress" || p.status === "Revisi",
+  )
+  const sum = (list: Project[]) => list.reduce((s, p) => s + p.price, 0)
+
   return {
     total: projects.length,
+    masuk: projects.filter((p) => p.status === "Masuk").length,
     onProgress: projects.filter((p) => p.status === "On Progress").length,
     revisi: projects.filter((p) => p.status === "Revisi").length,
     done: done.length,
     cancel: projects.filter((p) => p.status === "Cancel").length,
-    totalIncome: done.reduce((sum, p) => sum + p.price, 0),
-    pipelineIncome: pipeline.reduce((sum, p) => sum + p.price, 0),
+    siapDitagih: siapDitagih.length,
+    sudahDitagih: sudahDitagih.length,
+    incomeDitagih: sum(sudahDitagih),
+    incomeSiapDitagih: sum(siapDitagih),
+    incomePipeline: sum(pipeline),
     /*
-     * Memakai `isOverdue` yang SAMA dengan yang dipakai lencana baris tabel.
+     * Memakai `isOverdue` yang SAMA dengan yang dipakai lencana baris/kartu.
      * Sebelumnya di sini membandingkan stempel waktu (`deadline < Date.now()`),
-     * sedangkan tabel membandingkan tanggal di zona WIB — dua definisi berbeda,
+     * sedangkan daftar membandingkan tanggal di zona WIB — dua definisi berbeda,
      * sehingga angka "N proyek lewat deadline" di header bisa tidak cocok
-     * dengan jumlah baris yang benar-benar disorot kuning.
+     * dengan jumlah kartu yang benar-benar disorot.
      */
     overdue: pipeline.filter((p) => isOverdue(p.deadline)).length,
   }
 }
 
 /**
- * Pendapatan & jumlah proyek per bulan, 12 bulan penuh pada tahun berjalan.
+ * Jumlah proyek & nilai yang sudah ditagih per bulan, 12 bulan penuh pada tahun
+ * berjalan.
  *
- * Versi lama memakai array income/count yang di-hardcode lalu menambahkan data
- * asli di atasnya, dan hanya mencakup Januari–Juli sehingga proyek Agustus–
- * Desember hilang tanpa jejak. Sekarang seluruhnya diturunkan dari `projects`.
+ * Pengelompokan memakai `createdAt` — kapan proyek itu masuk. `income` sengaja
+ * hanya menghitung proyek yang SUDAH ditagih (`invoicedAt` terisi), supaya
+ * angka di grafik berarti uang yang benar-benar sudah ditagihkan, bukan
+ * perkiraan.
  */
 export function buildMonthlySeries(
   projects: Project[],
@@ -55,7 +69,7 @@ export function buildMonthlySeries(
     const bucket = buckets.get(key)
     if (!bucket) continue // di luar tahun yang ditampilkan
     bucket.count += 1
-    if (p.status === "Done") bucket.income += p.price
+    if (p.invoicedAt) bucket.income += p.price
   }
 
   return [...buckets.entries()].map(([key, v]) => {

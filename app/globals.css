@@ -6,6 +6,9 @@
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Serif hanya dipakai logo "ds" pada lembar PDF invoice. Antarmuka aplikasi
+     tidak lagi memakai serif sama sekali (aksen serif-miring pada judul dibuang
+     saat perombakan tampilan), jadi varian tegak Playfair tidak diunduh. */
   --font-serif: "Playfair Display", Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 

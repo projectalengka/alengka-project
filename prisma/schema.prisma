@@ -14,29 +14,63 @@ datasource db {
 }
 
 /// Status proyek sebagai enum, bukan String bebas.
-/// Sebelumnya nilai apa pun bisa tersimpan, dan satu typo membuat proyek
-/// hilang dari semua filter tanpa error.
+///
+/// `Masuk` adalah tahap paling awal di alur kerja: brief/permintaan desain baru
+/// diterima tetapi belum mulai dikerjakan. Sebelumnya proyek langsung lahir
+/// sebagai `On_Progress`, sehingga tidak ada wadah untuk pekerjaan yang baru
+/// masuk — padahal itulah titik awal alur "desain masuk sampai invoice".
 enum ProjectStatus {
+  Masuk
   On_Progress
   Revisi
   Done
   Cancel
 }
 
+/// Klien kini menjadi data tersendiri, bukan sekadar teks di dalam proyek.
+///
+/// Alasan: nama, kontak, dan alamat klien dulu harus diketik ulang setiap kali
+/// membuat invoice. Dengan tabel ini, invoice cukup memilih klien dan seluruh
+/// identitasnya terisi otomatis — dan semua proyek milik satu klien bisa dilihat
+/// dalam satu tempat.
+model Client {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  contact   String    @default("")
+  address   String    @default("") @db.Text
+  notes     String    @default("") @db.Text
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  projects  Project[]
+
+  @@map("clients")
+}
+
 model Project {
   id           String        @id @default(uuid())
-  clientName   String
   projectTitle String
+  clientId     String
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
   categoryId   String
   category     Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   price        Float
-  status       ProjectStatus @default(On_Progress)
+  status       ProjectStatus @default(Masuk)
   deadline     DateTime
   notes        String        @default("") @db.Text
   previewImage String?       @db.Text
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
 
+  /// Penanda proyek sudah masuk ke sebuah invoice.
+  ///
+  /// Invoice sendiri sengaja TIDAK disimpan sebagai tabel (keputusan pemilik
+  /// produk: cukup dibuat lalu diunduh). Tetapi tanpa penanda ini, proyek yang
+  /// sudah ditagih akan terus muncul di kolom "Siap Ditagih" dan berisiko
+  /// ditagih dua kali. Kolom ini hanya menandai, bukan menyimpan dokumennya.
+  invoicedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
   @@index([categoryId])
   @@index([status])
   @@index([createdAt])

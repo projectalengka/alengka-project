@@ -69,20 +69,26 @@ test("proyek tahun lain tidak bocor", () => {
 
 /* ------------------------------------------------------------ validasi form */
 
-/** Cermin dari validateProject() di actions/projects.ts. */
+/**
+ * Cermin dari validateProject() di actions/projects.ts.
+ *
+ * Perubahan sesi ini: identitas klien bukan lagi teks bebas (`clientName`) di
+ * dalam proyek, melainkan rujukan ke tabel `clients` (`clientId`). Status juga
+ * bertambah satu tahap paling awal, `Masuk`.
+ */
 function validateProject(data) {
-  if (!data.clientName?.trim()) return "Nama klien harus diisi."
   if (!data.projectTitle?.trim()) return "Judul proyek harus diisi."
+  if (!data.clientId) return "Klien harus dipilih."
   if (!data.categoryId) return "Kategori harus dipilih."
   if (typeof data.price !== "number" || !Number.isFinite(data.price) || data.price < 0) return "Harga tidak valid."
-  if (!["On Progress", "Revisi", "Done", "Cancel"].includes(data.status)) return "Status tidak dikenal."
+  if (!["Masuk", "On Progress", "Revisi", "Done", "Cancel"].includes(data.status)) return "Status tidak dikenal."
   if (!data.deadline) return "Deadline harus diisi."
   return null
 }
 
 const base = {
-  clientName: "Nexa", projectTitle: "Logo", categoryId: "Logo",
-  price: 1000, status: "Done", deadline: "2026-06-15",
+  projectTitle: "Logo", clientId: "cli_1", categoryId: "Logo",
+  price: 1000, status: "Masuk", deadline: "2026-06-15",
 }
 
 test("proyek valid lolos", () => assert.equal(validateProject(base), null))
@@ -91,13 +97,21 @@ test("status di luar enum ditolak", () => {
   assert.match(validateProject({ ...base, status: "Selesai" }), /Status tidak dikenal/)
 })
 
+test("status 'Masuk' adalah tahap awal yang sah", () => {
+  assert.equal(validateProject({ ...base, status: "Masuk" }), null)
+})
+
+test("proyek tanpa klien ditolak", () => {
+  assert.match(validateProject({ ...base, clientId: "" }), /Klien harus dipilih/)
+})
+
 test("harga non-numerik ditolak", () => {
   assert.ok(validateProject({ ...base, price: NaN }))
   assert.ok(validateProject({ ...base, price: -1 }))
 })
 
-test("klien hanya berisi spasi ditolak", () => {
-  assert.ok(validateProject({ ...base, clientName: "   " }))
+test("judul hanya berisi spasi ditolak", () => {
+  assert.ok(validateProject({ ...base, projectTitle: "   " }))
 })
 
 /* ------------------------------------------------------- tabrakan slug/id --- */

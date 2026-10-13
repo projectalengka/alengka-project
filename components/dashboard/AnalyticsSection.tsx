@@ -70,10 +70,10 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
 
           <div className="w-full grid grid-cols-4 gap-2 border-t border-neutral-100 dark:border-neutral-900 pt-5">
             {([
-              ["Selesai", statusDistribution.done],
-              ["Berjalan", statusDistribution.onProgress],
+              ["Masuk", statusDistribution.masuk],
+              ["Dikerjakan", statusDistribution.onProgress],
               ["Revisi", statusDistribution.revisi],
-              ["Batal", statusDistribution.cancel],
+              ["Selesai", statusDistribution.done],
             ] as const).map(([label, value], i) => (
               <div key={label} className={`text-center ${i > 0 ? "border-l border-neutral-100 dark:border-neutral-900" : ""}`}>
                 <span className="text-[8px] uppercase tracking-[0.1em] text-neutral-400 dark:text-neutral-500 block">{label}</span>
@@ -90,8 +90,8 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
                 <TrendingUp className="w-4 h-4 text-neutral-600 dark:text-neutral-400" />
               </div>
               <div>
-                <span className="text-xs font-semibold text-neutral-850 dark:text-neutral-150 block">Pendapatan Bulanan</span>
-                <span className="text-[10px] text-neutral-400 dark:text-neutral-500 block">Proyek selesai per bulan, {yearLabel}</span>
+                <span className="text-xs font-semibold text-neutral-850 dark:text-neutral-150 block">Nilai Ditagih Bulanan</span>
+                <span className="text-[10px] text-neutral-400 dark:text-neutral-500 block">Nilai proyek yang sudah ditagih per bulan, {yearLabel}</span>
               </div>
             </div>
             <div className="text-left sm:text-right shrink-0">
@@ -118,7 +118,7 @@ export default function AnalyticsSection({ projects }: AnalyticsSectionProps) {
 
               {!hasAnyData ? (
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-[11px] text-neutral-400 dark:text-neutral-500">Belum ada proyek untuk digambarkan.</span>
+                  <span className="text-[11px] text-neutral-400 dark:text-neutral-500">Belum ada nilai yang ditagih untuk digambarkan.</span>
                 </div>
               ) : (
                 <svg className="w-full h-full overflow-visible z-10" viewBox="0 0 1100 150" preserveAspectRatio="none">

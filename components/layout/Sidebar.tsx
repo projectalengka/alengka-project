@@ -1,87 +1,150 @@
 "use client"
 
-import { LayoutDashboard, FolderDot, BarChart3, Tag, Columns } from "lucide-react"
+import { LayoutGrid, Users, ReceiptText, BarChart3, Tags, Sun, Moon } from "lucide-react"
 import type { Tab } from "@/types"
 
 interface SidebarProps {
   activeTab: Tab
   onTabChange: (tab: Tab) => void
-  sidebarOpen: boolean
-  onToggleSidebar: () => void
+  /** Jumlah klien yang punya proyek siap ditagih — ditampilkan sebagai lencana. */
+  invoiceBadge?: number
+  darkMode: boolean
+  onToggleTheme: () => void
 }
 
-const navItems = [
-  { id: "dashboard" as Tab, label: "Beranda", icon: <LayoutDashboard className="w-4 h-4 stroke-[1.5]" /> },
-  { id: "projects" as Tab, label: "Proyek", icon: <FolderDot className="w-4 h-4 stroke-[1.5]" /> },
-  { id: "analytics" as Tab, label: "Laporan", icon: <BarChart3 className="w-4 h-4 stroke-[1.5]" /> },
-  { id: "categories" as Tab, label: "Kategori", icon: <Tag className="w-4 h-4 stroke-[1.5]" /> },
+/*
+ * Navigasi baru mengikuti alur kerja, bukan struktur data:
+ *   Papan    -> alur desain masuk sampai siap ditagih
+ *   Klien    -> siapa yang dikerjakan
+ *   Invoice  -> menagih
+ *   Laporan  -> melihat hasil
+ *   Kategori -> mengatur jenis layanan (jarang dipakai, ditaruh paling bawah)
+ */
+const PRIMARY_NAV: { id: Tab; label: string; icon: typeof LayoutGrid }[] = [
+  { id: "board", label: "Papan", icon: LayoutGrid },
+  { id: "clients", label: "Klien", icon: Users },
+  { id: "invoice", label: "Invoice", icon: ReceiptText },
+  { id: "analytics", label: "Laporan", icon: BarChart3 },
 ]
 
-export default function Sidebar({ activeTab, onTabChange, sidebarOpen, onToggleSidebar }: SidebarProps) {
+const SECONDARY_NAV: { id: Tab; label: string; icon: typeof LayoutGrid }[] = [
+  { id: "categories", label: "Kategori", icon: Tags },
+]
+
+const MOBILE_NAV = [...PRIMARY_NAV, ...SECONDARY_NAV]
+
+function NavButton({
+  label, icon: Icon, active, badge, onClick,
+}: {
+  label: string; icon: typeof LayoutGrid; active: boolean; badge?: number; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors cursor-pointer ${
+        active
+          ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-semibold"
+          : "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900 hover:text-neutral-900 dark:hover:text-neutral-100 font-medium"
+      }`}
+    >
+      <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={active ? 2.2 : 1.8} />
+      <span className="flex-1 text-left">{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+          active ? "bg-white/25 text-white dark:bg-neutral-900/20 dark:text-neutral-900" : "bg-violet-600 text-white"
+        }`}>
+          {badge}
+        </span>
+      )}
+    </button>
+  )
+}
+
+export default function Sidebar({
+  activeTab, onTabChange, invoiceBadge = 0, darkMode, onToggleTheme,
+}: SidebarProps) {
   return (
     <>
-      <aside className={`hidden md:flex flex-col bg-white dark:bg-[#09090b] border-r border-[#e5e5eb] dark:border-neutral-900 h-screen sticky top-0 text-neutral-800 dark:text-neutral-200 transition-[width] duration-200 ease-out select-none flex-shrink-0 z-40 overflow-hidden ${sidebarOpen ? "w-64" : "w-0 !border-r-0"}`}>
-        <div className="w-64 flex flex-col h-full shrink-0">
-          <div className="p-8 border-b border-neutral-100 dark:border-neutral-900 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-6 h-6 rounded bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 flex items-center justify-center font-serif italic text-xs font-medium uppercase">ds</div>
-              <div>
-                <h1 className="text-xs font-medium uppercase tracking-[0.1em] text-neutral-950 dark:text-white">DESIGN STUDIO</h1>
-                <p className="text-[8px] text-neutral-400 dark:text-neutral-500 tracking-[0.1em] uppercase mt-0.5">CURATED ARCHIVE</p>
-              </div>
-            </div>
-            <button onClick={onToggleSidebar} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-colors cursor-pointer" title="Sembunyikan Sidebar">
-              <Columns className="w-3.5 h-3.5" />
-            </button>
+      {/* ---------------- Desktop: sidebar tetap ---------------- */}
+      <aside className="hidden md:flex flex-col w-60 shrink-0 h-screen sticky top-0 bg-white dark:bg-[#0b0b0d] border-r border-neutral-200 dark:border-neutral-900">
+        <div className="px-5 py-5 flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center font-bold text-[13px] tracking-tight">
+            DS
           </div>
+          <div className="leading-tight">
+            <p className="text-[13px] font-semibold text-neutral-900 dark:text-white">Design Studio</p>
+            <p className="text-[10px] text-neutral-400 dark:text-neutral-500">Manajemen Proyek</p>
+          </div>
+        </div>
 
-          <nav className="flex-1 px-4 py-8 space-y-1">
-            <span className="px-3 text-[8.5px] uppercase tracking-[0.2em] text-neutral-400 dark:text-neutral-500 font-medium block mb-4">Menu</span>
-            {navItems.map((item) => {
-              const isActive = activeTab === item.id
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`w-full flex items-center px-3 py-2.5 rounded-lg transition-colors text-xs ${
-                    isActive
-                      ? "bg-neutral-100/60 dark:bg-neutral-900/60 text-neutral-950 dark:text-neutral-50 border border-neutral-200/30 dark:border-neutral-800/40 font-medium"
-                      : "text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50/10 dark:hover:bg-neutral-900/10 hover:text-neutral-800 dark:hover:text-neutral-200"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={isActive ? "text-neutral-950 dark:text-neutral-50" : "text-neutral-400"}>{item.icon}</div>
-                    <span className="font-medium">{item.label}</span>
-                  </div>
-                </button>
-              )
-            })}
-          </nav>
-          <div className="p-4 border-t border-neutral-200/50 dark:border-neutral-900 bg-neutral-50/50 dark:bg-[#0d0d0f]/50">
-            <div className="flex items-center gap-2 px-1">
-              <div className="w-6 h-6 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-850 flex items-center justify-center text-neutral-500 flex-shrink-0">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              </div>
-              <div className="overflow-hidden">
-                <span className="text-[9px] font-mono text-neutral-400 dark:text-neutral-500 block uppercase tracking-wider truncate">Pemilik</span>
-                <span className="text-[10px] text-neutral-500 dark:text-neutral-450 block truncate">Designer</span>
-              </div>
-            </div>
+        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+          {PRIMARY_NAV.map((item) => (
+            <NavButton
+              key={item.id}
+              label={item.label}
+              icon={item.icon}
+              active={activeTab === item.id}
+              badge={item.id === "invoice" ? invoiceBadge : undefined}
+              onClick={() => onTabChange(item.id)}
+            />
+          ))}
+
+          <div className="pt-4 mt-2 border-t border-neutral-100 dark:border-neutral-900">
+            <p className="px-3 pb-1.5 text-[10px] uppercase tracking-wider text-neutral-400 dark:text-neutral-600 font-semibold">
+              Pengaturan
+            </p>
+            {SECONDARY_NAV.map((item) => (
+              <NavButton
+                key={item.id}
+                label={item.label}
+                icon={item.icon}
+                active={activeTab === item.id}
+                onClick={() => onTabChange(item.id)}
+              />
+            ))}
           </div>
+        </nav>
+
+        <div className="p-3 border-t border-neutral-100 dark:border-neutral-900">
+          <button
+            onClick={onToggleTheme}
+            aria-label="Ganti tema"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors cursor-pointer"
+          >
+            {darkMode ? <Sun className="w-[18px] h-[18px]" /> : <Moon className="w-[18px] h-[18px]" />}
+            <span>{darkMode ? "Mode Terang" : "Mode Gelap"}</span>
+          </button>
         </div>
       </aside>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-black/80 border-t border-neutral-200/50 dark:border-neutral-900 text-neutral-500 py-3 px-6 flex items-center justify-around z-50 shadow-sm">
-        {navItems.map((item) => {
-          const isActive = activeTab === item.id
-          return (
-            <button key={item.id} onClick={() => onTabChange(item.id)} aria-current={isActive ? "page" : undefined} className={`flex flex-col items-center gap-1 transition-colors ${isActive ? "text-neutral-950 dark:text-white font-medium" : "text-neutral-400"}`}>
-              <div className="p-1 rounded-lg">{item.icon}</div>
-              <span className="text-[8px] uppercase tracking-wider">{item.label}</span>
-            </button>
-          )
-        })}
+      {/* ---------------- Mobile: navigasi bawah ---------------- */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-[#0b0b0d] border-t border-neutral-200 dark:border-neutral-900 pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-stretch">
+          {MOBILE_NAV.map((item) => {
+            const active = activeTab === item.id
+            const Icon = item.icon
+            const badge = item.id === "invoice" ? invoiceBadge : 0
+            return (
+              <button
+                key={item.id}
+                onClick={() => onTabChange(item.id)}
+                aria-current={active ? "page" : undefined}
+                className={`relative flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors cursor-pointer ${
+                  active ? "text-neutral-900 dark:text-white" : "text-neutral-400 dark:text-neutral-500"
+                }`}
+              >
+                <Icon className="w-[22px] h-[22px]" strokeWidth={active ? 2.4 : 1.8} />
+                <span className={`text-[10px] ${active ? "font-semibold" : "font-medium"}`}>{item.label}</span>
+                {badge > 0 && (
+                  <span className="absolute top-1.5 right-1/2 translate-x-4 min-w-[16px] h-4 px-1 rounded-full bg-violet-600 text-white text-[9px] font-bold flex items-center justify-center">
+                    {badge}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
       </nav>
     </>
   )

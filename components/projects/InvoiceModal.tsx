@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import type { Project, Category } from "@/types"
+import type { Project, Client } from "@/types"
 import { X, Printer, Landmark, Loader2, Edit3, Plus, Minus } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { replaceOklchColors } from "@/lib/print-colors"
@@ -17,11 +17,20 @@ function isoDate(offsetDays = 0): string {
 interface InvoiceModalProps {
   isOpen: boolean
   onClose: () => void
-  selectedProjects: Project[]
-  categories: Category[]
+  /** Klien yang ditagih — identitasnya mengisi kolom invoice secara otomatis. */
+  client: Client | null
+  /** Proyek yang masuk ke invoice ini. */
+  projects: Project[]
+  /**
+   * Dipanggil setelah PDF benar-benar tersimpan. Dipakai untuk menandai proyek
+   * sebagai "sudah ditagih" supaya tidak ikut tertagih lagi pada invoice berikutnya.
+   */
+  onGenerated?: (projectIds: string[]) => void
 }
 
-export default function InvoiceModal({ isOpen, onClose, selectedProjects, categories }: InvoiceModalProps) {
+export default function InvoiceModal({
+  isOpen, onClose, client, projects, onGenerated,
+}: InvoiceModalProps) {
   /* Nilai awal langsung diisi (lazy initializer), bukan "". Dulu state tanggal
      mulai dari "" dan baru diisi oleh useEffect SETELAH render pertama —
      pada render itu formatDate("") melempar RangeError dan seluruh halaman
@@ -32,9 +41,12 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
   )
   const [issueDate, setIssueDate] = useState(() => isoDate())
   const [dueDate, setDueDate] = useState(() => isoDate(14))
-  const [clientName, setClientName] = useState("")
-  const [clientContact, setClientContact] = useState("")
-  const [clientAddress, setClientAddress] = useState("")
+  /* Identitas klien terisi otomatis dari data klien — inilah yang menghilangkan
+     pengetikan ulang nama/kontak/alamat setiap kali membuat invoice. Nilainya
+     tetap boleh disunting untuk kasus khusus. */
+  const [clientName, setClientName] = useState(() => client?.name ?? "")
+  const [clientContact, setClientContact] = useState(() => client?.contact ?? "")
+  const [clientAddress, setClientAddress] = useState(() => client?.address ?? "")
   const [taxPercent, setTaxPercent] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
@@ -64,31 +76,25 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
     return () => observer.disconnect()
   }, [isOpen])
 
-  /* Peta nama kategori untuk lookup O(1). Sebelumnya `categories.find()`
-     dijalankan sekali per baris invoice. */
-  const categoryNameMap = useMemo(
-    () => new Map(categories.map((c) => [c.id, c.name])),
-    [categories],
-  )
-
   /**
-   * Kunci pilihan — hanya id, terurut.
+   * Kunci invoice — klien + susunan id proyek, bukan identitas array.
    *
-   * Ini memperbaiki bug nyata: efek inisialisasi dulu bergantung pada
-   * `selectedProjects` (IDENTITAS array). Setiap penyegaran data menghasilkan
-   * array baru, sehingga React menganggap "pilihan berubah" dan mengosongkan
-   * tanggal serta nama klien yang baru saja diketik. Sekarang inisialisasi
-   * hanya berjalan ketika SUSUNAN pilihan benar-benar berbeda.
+   * Ini menjaga perbaikan dari sesi sebelumnya: efek inisialisasi tidak boleh
+   * bergantung pada IDENTITAS array proyek, karena setiap penyegaran data
+   * menghasilkan array baru dan akan mengosongkan tanggal serta nama klien yang
+   * baru saja diketik. Inisialisasi hanya berjalan bila SUSUNAN-nya berubah.
    */
+  const projectIds = useMemo(() => projects.map((p) => p.id), [projects])
   const selectionKey = useMemo(
-    () => selectedProjects.map((p) => p.id).slice().sort().join("|"),
-    [selectedProjects],
+    () => `${client?.id ?? ""}::${projectIds.slice().sort().join("|")}`,
+    [client?.id, projectIds],
   )
 
   useEffect(() => {
-    if (selectedProjects.length === 0) return
-    const uniqueClients = Array.from(new Set(selectedProjects.map((p) => p.clientName)))
-    setClientName(uniqueClients.length === 1 ? uniqueClients[0] : uniqueClients.join(", "))
+    if (projects.length === 0) return
+    setClientName(client?.name ?? "")
+    setClientContact(client?.contact ?? "")
+    setClientAddress(client?.address ?? "")
     // Nomor invoice hanya dibuat bila masih kosong — kalau tidak, mengubah
     // pilihan saat modal terbuka akan menimpa nomor yang sudah diedit.
     setInvoiceNo((prev) =>
@@ -96,16 +102,16 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
     )
     setIssueDate(isoDate())
     setDueDate(isoDate(14))
-    // Sengaja TIDAK memakai `selectedProjects` sebagai dependensi (lihat catatan
+    // Sengaja TIDAK memakai `projects`/`client` sebagai dependensi (lihat catatan
     // di atas). `selectionKey` sudah mewakili perubahan yang relevan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey, isOpen])
 
   useEscape(isOpen, onClose)
 
-  if (!isOpen || selectedProjects.length === 0) return null
+  if (!isOpen || projects.length === 0) return null
 
-  const subtotal = selectedProjects.reduce((acc, p) => acc + p.price, 0)
+  const subtotal = projects.reduce((acc, p) => acc + p.price, 0)
   const taxAmount = (subtotal * taxPercent) / 100
   /* Diskon dibatasi pada subtotal + pajak. Sebelumnya hanya dijaga >= 0,
      sehingga diskon yang lebih besar dari tagihan menghasilkan total NEGATIF
@@ -113,8 +119,6 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
   const maxDiscount = subtotal + taxAmount
   const safeDiscount = Math.min(Math.max(0, discountAmount), maxDiscount)
   const totalAmount = subtotal + taxAmount - safeDiscount
-
-  const getCategoryName = (catId: string) => categoryNameMap.get(catId) ?? catId
 
   const handlePrint = async () => {
     setIsGeneratingPdf(true)
@@ -203,6 +207,11 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
 
       setProgress(95)
       pdf.save(`Invoice_${invoiceNo.replace(/\s+/g, "_")}.pdf`)
+
+      /* Baru setelah berkas benar-benar dibuat, proyek ditandai sudah ditagih.
+         Kalau penandaan dilakukan sebelum render berhasil, proyek bisa
+         "menghilang" dari kolom Siap Ditagih padahal invoice-nya gagal dibuat. */
+      onGenerated?.(projects.map((p) => p.id))
     } catch (error) {
       console.error("PDF failed:", error)
       window.print()
@@ -228,7 +237,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                 Invoice
               </h2>
               <p className="text-[9.5px] text-neutral-400 dark:text-neutral-500">
-                {selectedProjects.length} proyek dipilih &middot; Total <span className="font-semibold text-neutral-700 dark:text-neutral-300">{formatCurrency(totalAmount)}</span>
+                {projects.length} proyek ditagih &middot; Total <span className="font-semibold text-neutral-700 dark:text-neutral-300">{formatCurrency(totalAmount)}</span>
               </p>
             </div>
           </div>
@@ -484,7 +493,7 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedProjects.map((p, idx) => (
+                  {projects.map((p, idx) => (
                     <tr key={p.id} style={{
                       borderBottom: "1px solid #f0f0f0",
                       transition: "background 0.15s",
@@ -494,9 +503,13 @@ export default function InvoiceModal({ isOpen, onClose, selectedProjects, catego
                       </td>
                       <td style={{ padding: "10px 10px" }}>
                         <div style={{ fontWeight: 600, fontSize: "9pt", color: "#1a1a2e", marginBottom: "1px" }}>{p.projectTitle}</div>
-                        <div style={{ fontSize: "7pt", color: "#bbb" }}>{p.clientName}</div>
+                        {/* Dulu baris ini menampilkan nama klien. Sejak invoice dibuat
+                            per klien, mengulang nama yang sama di setiap baris jadi
+                            mubazir — diganti tanggal deadline proyek, pada slot dan
+                            gaya yang persis sama supaya tata letak lembar tidak berubah. */}
+                        <div style={{ fontSize: "7pt", color: "#bbb" }}>{formatDate(p.deadline)}</div>
                       </td>
-                      <td style={{ padding: "10px 10px", color: "#888", fontSize: "8pt" }}>{getCategoryName(p.categoryId)}</td>
+                      <td style={{ padding: "10px 10px", color: "#888", fontSize: "8pt" }}>{p.category.name}</td>
                       <td style={{ padding: "10px 10px", textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: "8.5pt" }}>
                         {formatCurrency(p.price)}
                       </td>

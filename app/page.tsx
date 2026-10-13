@@ -1,80 +1,80 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
-import type { Project, Category, Tab, ProjectFormData, ProjectStatus, DashboardPayload } from "@/types"
+import type {
+  Project, Category, Client, Tab, ProjectFormData, ProjectStatus, DashboardPayload,
+} from "@/types"
 import {
-  getDashboardData, createProject, updateProject, deleteProject, updateProjectStatus,
+  getDashboardData, createProject, updateProject, deleteProject,
+  updateProjectStatus, setProjectsInvoiced,
 } from "@/actions/projects"
 import Sidebar from "@/components/layout/Sidebar"
-import StatsGrid from "@/components/dashboard/StatsGrid"
-import ProjectList from "@/components/projects/ProjectList"
+import SummaryStrip from "@/components/dashboard/SummaryStrip"
+import PipelineBoard from "@/components/board/PipelineBoard"
 import ConfirmModal from "@/components/projects/ConfirmModal"
 import Toast, { type ToastType } from "@/components/ui/Toast"
 import ErrorBoundary from "@/components/ErrorBoundary"
-import { PlusCircle, RefreshCw, Sun, Moon, Columns } from "lucide-react"
+import { RefreshCw, Wifi, WifiOff } from "lucide-react"
 
 /* Tab yang tidak terlihat tidak perlu ikut di bundel awal. */
-const AnalyticsSection = dynamic(() => import("@/components/dashboard/AnalyticsSection"), {
-  loading: () => <TabSkeleton />,
-})
-const CategoryManager = dynamic(() => import("@/components/categories/CategoryManager"), {
-  loading: () => <TabSkeleton />,
-})
-const ProjectForm = dynamic(() => import("@/components/projects/ProjectForm"), {
-  ssr: false,
-})
+const AnalyticsSection = dynamic(() => import("@/components/dashboard/AnalyticsSection"), { loading: () => <TabSkeleton /> })
+const CategoryManager = dynamic(() => import("@/components/categories/CategoryManager"), { loading: () => <TabSkeleton /> })
+const ClientManager = dynamic(() => import("@/components/clients/ClientManager"), { loading: () => <TabSkeleton /> })
+const InvoiceWorkspace = dynamic(() => import("@/components/invoice/InvoiceWorkspace"), { loading: () => <TabSkeleton /> })
+const ProjectForm = dynamic(() => import("@/components/projects/ProjectForm"), { ssr: false })
+const InvoiceModal = dynamic(() => import("@/components/projects/InvoiceModal"), { ssr: false })
 
-/* Kerangka statis. Dulu memakai denyut tak berujung (pulse) yang melukis ulang
-   tiga blok ini terus-menerus. Kerangka statis memberi sinyal "sedang memuat"
-   yang sama tanpa biaya render. */
 function TabSkeleton() {
   return (
-    <div className="space-y-4">
-      <div className="h-6 w-40 bg-neutral-100 dark:bg-neutral-900 rounded" />
-      <div className="h-48 bg-neutral-100/70 dark:bg-neutral-900/50 rounded-xl" />
-      <div className="h-32 bg-neutral-100/50 dark:bg-neutral-900/30 rounded-xl" />
+    <div className="space-y-3">
+      <div className="h-10 bg-neutral-100 dark:bg-neutral-900 rounded-xl" />
+      <div className="h-40 bg-neutral-100/70 dark:bg-neutral-900/50 rounded-2xl" />
     </div>
   )
 }
 
 const EMPTY_STATS = {
-  total: 0, onProgress: 0, revisi: 0, done: 0, cancel: 0,
-  totalIncome: 0, pipelineIncome: 0, overdue: 0,
+  total: 0, masuk: 0, onProgress: 0, revisi: 0, done: 0, cancel: 0,
+  siapDitagih: 0, sudahDitagih: 0, incomeDitagih: 0, incomeSiapDitagih: 0,
+  incomePipeline: 0, overdue: 0,
 }
 
 const POLL_INTERVAL_MS = 30_000
 
+const TAB_TITLE: Record<Tab, { title: string; subtitle: string }> = {
+  board: { title: "Papan Kerja", subtitle: "Dari desain masuk sampai siap ditagih" },
+  clients: { title: "Klien", subtitle: "Data klien & proyeknya" },
+  invoice: { title: "Invoice", subtitle: "Tagih proyek yang sudah selesai" },
+  analytics: { title: "Laporan", subtitle: "Nilai yang sudah ditagih" },
+  categories: { title: "Kategori", subtitle: "Jenis layanan desain" },
+}
+
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [stats, setStats] = useState(EMPTY_STATS)
-  const [activeTab, setActiveTab] = useState<Tab>("dashboard")
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [activeTab, setActiveTab] = useState<Tab>("board")
   const [darkMode, setDarkMode] = useState(false)
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [isConfirmOpen, setIsConfirmOpen] = useState(false)
-  /* Modal invoice hidup di dalam ProjectList, jadi halaman tidak tahu kapan ia
-     terbuka. Tanpa penanda ini, poll 30 detik tetap berjalan selagi pengguna
-     mengisi invoice — dan karena daftar proyek ikut disegarkan, modal invoice
-     menganggap "pilihan berubah" lalu mengosongkan tanggal/nama klien yang
-     baru saja diketik. */
-  const [invoiceOpen, setInvoiceOpen] = useState(false)
-  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null)
-  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
-  const [toast, setToast] = useState<{ message: string; type?: ToastType } | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState("")
+  const [toast, setToast] = useState<{ message: string; type?: ToastType } | null>(null)
+
+  const [formOpen, setFormOpen] = useState(false)
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null)
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [invoiceTarget, setInvoiceTarget] = useState<{ clientId: string; projectIds: string[] } | null>(null)
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // Dibaca di dalam interval tanpa menjadikannya dependency -> interval tidak
-  // ikut dibongkar-pasang setiap kali modal dibuka/ditutup.
+  // ikut dibongkar-pasang setiap kali dialog dibuka/ditutup.
   const uiBusyRef = useRef(false)
   useEffect(() => {
-    uiBusyRef.current = isModalOpen || isConfirmOpen || invoiceOpen
-  }, [isModalOpen, isConfirmOpen, invoiceOpen])
+    uiBusyRef.current = formOpen || projectToDelete !== null || invoiceTarget !== null
+  }, [formOpen, projectToDelete, invoiceTarget])
 
   /* ---------------------------------------------------------------- tema --- */
   useEffect(() => {
@@ -97,15 +97,14 @@ export default function Home() {
   /**
    * Sumber kebenaran tunggal.
    *
-   * Sebelumnya: revalidatePath("/") dipanggil di setiap action, tetapi halaman
-   * ini "use client" dan datanya ada di useState — invalidation Router Cache
-   * tidak bisa menyentuh useState, jadi hasilnya tidak pernah terpakai dan
-   * App mengandalkan poll 15 detik untuk me-refresh. Sekarang action yang
-   * mengembalikan data, dan satu fungsi ini yang memasangnya.
+   * Action yang mengembalikan seluruh payload, dan satu fungsi ini yang
+   * memasangnya. Halaman tidak memanggil revalidatePath (tidak berpengaruh pada
+   * state komponen klien) dan tidak melakukan polling buta.
    */
   const applyPayload = useCallback((payload: DashboardPayload) => {
     setProjects(payload.projects)
     setCategories(payload.categories)
+    setClients(payload.clients)
     setStats(payload.stats)
     setLoadError(null)
     setLastSync(new Date().toLocaleTimeString("id-ID", {
@@ -123,8 +122,7 @@ export default function Home() {
      * MELEMPAR tanpa sempat mengembalikan apa pun — koneksi database putus,
      * fungsi serverless gagal cold-start, atau jaringan pengguna terputus.
      * Dulu tidak ada penanganan, sehingga `setLoading(false)` tidak pernah
-     * dijalankan dan halaman menggantung selamanya di layar "Memuat...",
-     * tanpa pesan apa pun. Terbukti terjadi saat deploy pertama.
+     * dijalankan dan halaman menggantung selamanya di layar "Memuat...".
      */
     try {
       const res = await getDashboardData()
@@ -164,7 +162,6 @@ export default function Home() {
       if (document.hidden) {
         if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
       } else {
-        // data pasti basi setelah tab disembunyikan -> segarkan diam-diam
         void loadData({ silent: true })
         schedule()
       }
@@ -189,7 +186,7 @@ export default function Home() {
       triggerToast(res.error, "warning")
       return false // biarkan modal tetap terbuka supaya isian tidak hilang
     }
-    triggerToast(projectToEdit ? "Proyek berhasil diperbarui!" : "Proyek berhasil ditambahkan!")
+    triggerToast(projectToEdit ? "Proyek diperbarui." : "Proyek baru tersimpan.")
     setProjectToEdit(null)
     void loadData({ silent: true })
     return true
@@ -216,23 +213,17 @@ export default function Home() {
       triggerToast(res.error, "warning")
       return
     }
-    triggerToast(`Status diganti jadi ${status}.`)
+    triggerToast(`Status dipindah ke ${status}.`)
     void loadData({ silent: true })
   }, [triggerToast, loadData])
 
   const handleEditClick = useCallback((project: Project) => {
     setProjectToEdit(project)
-    setIsModalOpen(true)
+    setFormOpen(true)
   }, [])
 
   const handleDeleteClick = useCallback((project: Project) => {
     setProjectToDelete(project)
-    setIsConfirmOpen(true)
-  }, [])
-
-  const closeConfirm = useCallback(() => {
-    setIsConfirmOpen(false)
-    setProjectToDelete(null)
   }, [])
 
   const handleConfirmDelete = useCallback(async () => {
@@ -245,146 +236,216 @@ export default function Home() {
       triggerToast(res.error, "warning")
       return // modal tetap terbuka agar user bisa mencoba lagi / membatalkan
     }
-    triggerToast(`"${target.projectTitle}" berhasil dihapus.`, "warning")
-    closeConfirm()
+    triggerToast(`"${target.projectTitle}" dihapus.`, "warning")
+    setProjectToDelete(null)
     void loadData({ silent: true })
-  }, [projectToDelete, triggerToast, closeConfirm, loadData])
+  }, [projectToDelete, triggerToast, loadData])
+
+  const handleSetInvoiced = useCallback(async (ids: string[], invoiced: boolean) => {
+    if (ids.length === 0) return
+    const res = await setProjectsInvoiced(ids, invoiced)
+    if (!res.ok) { triggerToast(res.error, "warning"); return }
+    triggerToast(
+      invoiced
+        ? `${res.data.count} proyek ditandai sudah ditagih.`
+        : `${res.data.count} proyek dikembalikan ke Siap Ditagih.`,
+      invoiced ? "success" : "warning",
+    )
+    void loadData({ silent: true })
+  }, [triggerToast, loadData])
+
+  const openInvoiceFor = useCallback((clientId: string, projectIds: string[]) => {
+    setInvoiceTarget({ clientId, projectIds })
+  }, [])
+
+  /* ------------------------------------------------------------- turunan --- */
+
+  /** Klien yang masih punya proyek siap ditagih — untuk lencana di navigasi. */
+  const invoiceBadge = useMemo(() => {
+    const set = new Set<string>()
+    for (const p of projects) {
+      if (p.status === "Done" && !p.invoicedAt) set.add(p.clientId)
+    }
+    return set.size
+  }, [projects])
+
+  const invoiceClient = useMemo(
+    () => (invoiceTarget ? clients.find((c) => c.id === invoiceTarget.clientId) ?? null : null),
+    [invoiceTarget, clients],
+  )
+
+  const invoiceProjects = useMemo(() => {
+    if (!invoiceTarget) return []
+    const wanted = new Set(invoiceTarget.projectIds)
+    return projects.filter((p) => wanted.has(p.id))
+  }, [invoiceTarget, projects])
 
   /* ------------------------------------------------------------- render --- */
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f5f5f7] dark:bg-[#09090b] flex items-center justify-center">
+      <div className="min-h-screen bg-[#f7f7f8] dark:bg-[#08080a] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 rounded bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 flex items-center justify-center font-sans italic text-xs font-medium uppercase">ds</div>
-          <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono tracking-widest uppercase">Memuat...</span>
+          <div className="w-9 h-9 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center font-bold text-[13px]">
+            DS
+          </div>
+          <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-medium">Memuat data...</span>
         </div>
       </div>
     )
   }
 
+  const heading = TAB_TITLE[activeTab]
+
   return (
     <ErrorBoundary>
-    <div className="min-h-screen bg-[#f5f5f7] dark:bg-[#09090b] text-[#1d1d1f] dark:text-[#f5f5f7] flex flex-col md:flex-row font-sans transition-colors duration-200">
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((v) => !v)}
-      />
+      <div className="min-h-screen bg-[#f7f7f8] dark:bg-[#08080a] text-neutral-900 dark:text-neutral-100 flex">
+        <Sidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          invoiceBadge={invoiceBadge}
+          darkMode={darkMode}
+          onToggleTheme={() => setDarkMode((v) => !v)}
+        />
 
-      <main className={`flex-1 p-4 sm:p-6 lg:p-8 w-full space-y-6 overflow-y-auto mb-16 md:mb-0 transition-[max-width] duration-200 ease-out mx-auto ${sidebarOpen ? "max-w-6xl" : "max-w-7xl"}`}>
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 border-b border-neutral-200/30 dark:border-neutral-900 pb-6">
-          <div>
-            <div className="flex items-center gap-2" title={lastSync ? `Terakhir sinkron: ${lastSync}` : undefined}>
-              <span className={`w-1.5 h-1.5 rounded-full ${loadError ? "bg-red-500" : "bg-emerald-500"}`} />
-              <span className="text-[8.5px] text-neutral-400 dark:text-neutral-500 font-mono uppercase tracking-[0.2em] font-medium">
-                {loadError ? "Offline" : "Live"}
-              </span>
-              {lastSync && <span className="text-[8px] text-neutral-400/60 dark:text-neutral-600 font-mono">{lastSync}</span>}
+        <main className="flex-1 min-w-0 pb-24 md:pb-0">
+          {/* Header halaman */}
+          <header className="sticky top-0 z-30 bg-[#f7f7f8]/95 dark:bg-[#08080a]/95 border-b border-neutral-200 dark:border-neutral-900">
+            <div className="px-4 md:px-6 py-3.5 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-[17px] md:text-xl font-semibold tracking-tight truncate">
+                  {heading.title}
+                </h1>
+                <p className="text-[11.5px] text-neutral-500 dark:text-neutral-400 truncate">
+                  {heading.subtitle}
+                </p>
+              </div>
+
+              <div
+                className="hidden sm:flex items-center gap-1.5 text-[11px] text-neutral-500 dark:text-neutral-400"
+                title={lastSync ? `Terakhir sinkron: ${lastSync}` : undefined}
+              >
+                {loadError
+                  ? <WifiOff className="w-3.5 h-3.5 text-red-500" />
+                  : <Wifi className="w-3.5 h-3.5 text-emerald-500" />}
+                <span className="font-medium">{loadError ? "Offline" : "Tersinkron"}</span>
+              </div>
+
+              <button
+                onClick={() => loadData({ silent: true })}
+                aria-label="Segarkan data"
+                className="p-2.5 rounded-xl text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-900 transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-light text-neutral-950 dark:text-neutral-50 tracking-tight mt-1.5 flex items-center gap-2">
-              {!sidebarOpen && (
-                <button onClick={() => setSidebarOpen(true)} className="hidden md:inline-flex p-1.5 mr-1 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-colors cursor-pointer">
-                  <Columns className="w-4 h-4" />
-                </button>
-              )}
-              {activeTab === "dashboard" && <>Beranda <span className="font-serif italic font-normal text-neutral-400 dark:text-neutral-500">Desk</span></>}
-              {activeTab === "projects" && <>Proyek <span className="font-serif italic font-normal text-neutral-400 dark:text-neutral-500">Desain</span></>}
-              {activeTab === "analytics" && <>Laporan <span className="font-serif italic font-normal text-neutral-400 dark:text-neutral-500">Keuangan</span></>}
-              {activeTab === "categories" && <>Kategori <span className="font-serif italic font-normal text-neutral-400 dark:text-neutral-500">Layanan</span></>}
-            </h1>
-            {stats.overdue > 0 && (activeTab === "dashboard" || activeTab === "projects") && (
-              <p className="text-[10.5px] text-amber-600 dark:text-amber-400 mt-1.5">
-                {stats.overdue} proyek aktif sudah melewati deadline.
-              </p>
-            )}
-          </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <button onClick={() => setDarkMode((v) => !v)} aria-label="Ganti tema" className="p-2 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-colors cursor-pointer bg-neutral-100/10 hover:bg-neutral-100/30 dark:bg-neutral-900/10 dark:hover:bg-neutral-900/30">
-              {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-neutral-500" />}
-            </button>
-            <button onClick={() => loadData({ silent: true })} className="px-3 py-1.5 text-neutral-400 hover:text-neutral-950 dark:hover:text-white rounded-lg transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-100/30 dark:hover:bg-neutral-900/30">
-              <RefreshCw className="w-3 h-3" />Refresh
-            </button>
-            <button onClick={() => { setProjectToEdit(null); setIsModalOpen(true) }} className="px-4 py-1.5 bg-neutral-950 dark:bg-neutral-100 hover:bg-neutral-800 dark:hover:bg-white text-white dark:text-neutral-950 font-medium rounded-full text-xs flex items-center gap-2 transition cursor-pointer shadow-xs active:scale-[0.98]">
-              <PlusCircle className="w-3.5 h-3.5" />Baru
-            </button>
-          </div>
-        </header>
-
-        {loadError && (
-          <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg p-3.5">
-            <span className="text-red-500 text-xs font-medium flex-1">{loadError}</span>
-            <button onClick={() => loadData({ showLoader: true })} className="text-[11px] font-semibold text-red-600 dark:text-red-400 hover:underline cursor-pointer shrink-0">
-              Coba lagi
-            </button>
-          </div>
-        )}
-
-        <div className="space-y-6 min-h-[50vh]">
-          {activeTab === "dashboard" && (
-            <div className="space-y-6 animate-fade-in">
-              <StatsGrid stats={stats} />
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <div className="lg:col-span-12">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-[10px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-[0.2em]">Proyek Terbaru</h3>
-                      <p className="text-xs text-neutral-450 dark:text-neutral-400 mt-0.5">5 proyek terbaru</p>
-                    </div>
-                    <button onClick={() => setActiveTab("projects")} className="text-xs text-neutral-500 hover:text-neutral-950 dark:hover:text-white font-medium flex items-center gap-1 cursor-pointer">
-                      Lihat Semua &rarr;
-                    </button>
-                  </div>
-                  <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} onInvoiceOpenChange={setInvoiceOpen} isDashboard />
+            {loadError && (
+              <div className="px-4 md:px-6 pb-3">
+                <div className="flex items-start gap-2.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl p-3">
+                  <span className="text-red-700 dark:text-red-400 text-[12px] font-medium flex-1">{loadError}</span>
+                  <button
+                    onClick={() => loadData({ showLoader: true })}
+                    className="text-[12px] font-semibold text-red-700 dark:text-red-400 hover:underline cursor-pointer shrink-0"
+                  >
+                    Coba lagi
+                  </button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </header>
 
-          {activeTab === "projects" && (
-            <div className="animate-fade-in">
-              <div className="mb-5">
-                <h3 className="text-[10px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-[0.2em]">Semua Proyek</h3>
-                <p className="text-xs text-neutral-450 dark:text-neutral-400 mt-0.5">Semua proyek yang pernah dikerjain.</p>
-              </div>
-              <ProjectList projects={projects} categories={categories} onEdit={handleEditClick} onDelete={handleDeleteClick} onStatusChange={handleStatusChange} onInvoiceOpenChange={setInvoiceOpen} />
-            </div>
-          )}
+          <div className="p-4 md:p-6 space-y-4">
+            {activeTab === "board" && (
+              <>
+                <SummaryStrip stats={stats} onOpenInvoice={() => setActiveTab("invoice")} />
+                <PipelineBoard
+                  projects={projects}
+                  onEdit={handleEditClick}
+                  onDelete={handleDeleteClick}
+                  onStatusChange={handleStatusChange}
+                  onInvoice={(p) => openInvoiceFor(p.clientId, [p.id])}
+                  onNewProject={() => { setProjectToEdit(null); setFormOpen(true) }}
+                />
+              </>
+            )}
 
-          {activeTab === "analytics" && <AnalyticsSection projects={projects} />}
+            {activeTab === "clients" && (
+              <ClientManager
+                clients={clients}
+                projects={projects}
+                onChanged={() => loadData({ silent: true })}
+                onToast={triggerToast}
+                onInvoiceClient={(clientId) => {
+                  const ids = projects
+                    .filter((p) => p.clientId === clientId && p.status === "Done" && !p.invoicedAt)
+                    .map((p) => p.id)
+                  if (ids.length === 0) {
+                    triggerToast("Klien ini belum punya proyek selesai yang siap ditagih.", "warning")
+                    return
+                  }
+                  openInvoiceFor(clientId, ids)
+                }}
+              />
+            )}
 
-          {activeTab === "categories" && (
-            <CategoryManager
-              categories={categories}
-              onChanged={() => loadData({ silent: true })}
-              onToast={triggerToast}
-            />
-          )}
-        </div>
-      </main>
+            {activeTab === "invoice" && (
+              <InvoiceWorkspace
+                clients={clients}
+                projects={projects}
+                onOpenInvoice={openInvoiceFor}
+                onUnmark={(ids) => handleSetInvoiced(ids, false)}
+                onMark={(ids) => handleSetInvoiced(ids, true)}
+                onGoToBoard={() => setActiveTab("board")}
+              />
+            )}
 
-      <ProjectForm
-        isOpen={isModalOpen}
-        onClose={() => { setIsModalOpen(false); setProjectToEdit(null) }}
-        onSave={handleSaveProject}
-        projectToEdit={projectToEdit}
-        categories={categories}
-      />
+            {activeTab === "analytics" && <AnalyticsSection projects={projects} />}
 
-      <ConfirmModal
-        isOpen={isConfirmOpen}
-        title="Hapus Proyek"
-        projectName={projectToDelete?.projectTitle || ""}
-        busy={deletingId !== null}
-        onConfirm={handleConfirmDelete}
-        onCancel={closeConfirm}
-      />
+            {activeTab === "categories" && (
+              <CategoryManager
+                categories={categories}
+                onChanged={() => loadData({ silent: true })}
+                onToast={triggerToast}
+              />
+            )}
+          </div>
+        </main>
 
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-    </div>
+        {/* ------------------------------- Dialog ------------------------------- */}
+        <ProjectForm
+          isOpen={formOpen}
+          onClose={() => { setFormOpen(false); setProjectToEdit(null) }}
+          onSave={handleSaveProject}
+          projectToEdit={projectToEdit}
+          clients={clients}
+          categories={categories}
+        />
+
+        <ConfirmModal
+          isOpen={projectToDelete !== null}
+          title="Hapus Proyek"
+          projectName={projectToDelete?.projectTitle || ""}
+          busy={deletingId !== null}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setProjectToDelete(null)}
+        />
+
+        {invoiceTarget && (
+          <InvoiceModal
+            isOpen
+            onClose={() => setInvoiceTarget(null)}
+            client={invoiceClient}
+            projects={invoiceProjects}
+            onGenerated={(ids) => {
+              setInvoiceTarget(null)
+              void handleSetInvoiced(ids, true)
+            }}
+          />
+        )}
+
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </div>
     </ErrorBoundary>
   )
 }

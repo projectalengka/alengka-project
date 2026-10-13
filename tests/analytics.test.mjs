@@ -5,11 +5,13 @@ import assert from "node:assert/strict"
  * Uji regresi analitik — memakai KODE ASLI dari lib/analytics.ts (bukan
  * salinan), dijalankan lewat tsx sebagai loader.
  *
- * Latar belakang temuan sesi ini: `computeStats()` menghitung jumlah proyek
- * terlambat dengan MEMBANDINGKAN STEMPEL WAKTU (`deadline < Date.now()`),
- * sedangkan lencana baris tabel memakai `isOverdue()` yang membandingkan
- * TANGGAL di zona WIB. Dua definisi berbeda membuat angka di header bisa tidak
- * cocok dengan jumlah baris yang benar-benar disorot.
+ * Dua hal yang dijaga berkas ini:
+ *  1. "Terlambat" hanya boleh punya SATU definisi. Dulu `computeStats`
+ *     membandingkan stempel waktu sementara kartu proyek membandingkan tanggal
+ *     di zona WIB, sehingga angka di ringkasan tidak cocok dengan jumlah kartu
+ *     yang benar-benar disorot.
+ *  2. Sejak alur invoice dipisah dari status, "siap ditagih" BUKAN status
+ *     melainkan turunan: proyek `Done` yang belum punya `invoicedAt`.
  */
 import { computeStats, buildMonthlySeries, buildCategorySlices } from "../lib/analytics.ts"
 
@@ -17,15 +19,17 @@ import { computeStats, buildMonthlySeries, buildCategorySlices } from "../lib/an
 function mk(over = {}) {
   return {
     id: "p1",
-    clientName: "Klien",
     projectTitle: "Proyek",
+    clientId: "c1",
+    client: { id: "c1", name: "Klien", contact: "", address: "", notes: "" },
     categoryId: "k1",
     category: { id: "k1", name: "Kategori", iconName: "Tag" },
     price: 1_000_000,
-    status: "On Progress",
+    status: "Masuk",
     deadline: new Date(),
     notes: "",
     previewImage: null,
+    invoicedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...over,
@@ -55,34 +59,62 @@ test("proyek Selesai/Batal tidak pernah dihitung terlambat", () => {
   assert.equal(computeStats([mk({ status: "Cancel", deadline: y })]).overdue, 0)
 })
 
-test("statistik dasar dihitung benar", () => {
+/* --------------------------------------------------------------- statistik */
+
+test("setiap tahap alur dihitung pada kolomnya sendiri", () => {
   const s = computeStats([
-    mk({ status: "Done", price: 2_000_000 }),
-    mk({ status: "On Progress", price: 3_000_000 }),
-    mk({ status: "Revisi", price: 1_000_000 }),
-    mk({ status: "Cancel", price: 9_000_000 }),
+    mk({ status: "Masuk" }),
+    mk({ status: "On Progress" }),
+    mk({ status: "Revisi" }),
+    mk({ status: "Done" }),
+    mk({ status: "Cancel" }),
   ])
-  assert.equal(s.total, 4)
-  assert.equal(s.done, 1)
+  assert.equal(s.total, 5)
+  assert.equal(s.masuk, 1)
   assert.equal(s.onProgress, 1)
   assert.equal(s.revisi, 1)
+  assert.equal(s.done, 1)
   assert.equal(s.cancel, 1)
-  assert.equal(s.totalIncome, 2_000_000, "hanya proyek selesai")
-  assert.equal(s.pipelineIncome, 4_000_000, "berjalan + revisi")
+})
+
+test("siap ditagih = Selesai yang belum pernah masuk invoice", () => {
+  const s = computeStats([
+    mk({ status: "Done", price: 2_000_000 }),                          // siap ditagih
+    mk({ status: "Done", price: 3_000_000, invoicedAt: new Date() }),  // sudah ditagih
+    mk({ status: "On Progress", price: 9_000_000 }),                   // belum selesai
+  ])
+  assert.equal(s.siapDitagih, 1)
+  assert.equal(s.sudahDitagih, 1)
+  assert.equal(s.incomeSiapDitagih, 2_000_000)
+  assert.equal(s.incomeDitagih, 3_000_000)
+})
+
+test("proyek yang masih dikerjakan tidak dihitung sebagai pendapatan", () => {
+  const s = computeStats([
+    mk({ status: "Masuk", price: 1_000_000 }),
+    mk({ status: "On Progress", price: 2_000_000 }),
+    mk({ status: "Revisi", price: 3_000_000 }),
+  ])
+  assert.equal(s.incomePipeline, 6_000_000)
+  assert.equal(s.incomeDitagih, 0)
+  assert.equal(s.incomeSiapDitagih, 0)
 })
 
 /* --------------------------------------------------------------- deret bulan */
 
-test("deret bulanan asli selalu 12 bulan dan hanya Done jadi pendapatan", () => {
+test("deret bulanan asli selalu 12 bulan", () => {
   const year = new Date().getFullYear()
   assert.equal(buildMonthlySeries([], year).length, 12)
+})
 
+test("pendapatan bulanan hanya dari proyek yang SUDAH ditagih", () => {
+  const year = new Date().getFullYear()
   const series = buildMonthlySeries([
-    mk({ status: "Done", price: 5_000_000, createdAt: new Date(year, 0, 15) }),
-    mk({ status: "On Progress", price: 9_999_999, createdAt: new Date(year, 0, 16) }),
+    mk({ status: "Done", price: 5_000_000, invoicedAt: new Date(), createdAt: new Date(year, 0, 15) }),
+    mk({ status: "Done", price: 9_000_000, invoicedAt: null, createdAt: new Date(year, 0, 16) }),
   ], year)
-  assert.equal(series[0].income, 5_000_000)
-  assert.equal(series[0].count, 2, "semua proyek dihitung sebagai jumlah")
+  assert.equal(series[0].income, 5_000_000, "yang belum ditagih tidak dihitung")
+  assert.equal(series[0].count, 2, "tetapi jumlah proyek tetap dihitung")
 })
 
 test("tanggal rusak dilewati, tidak menjatuhkan perhitungan", () => {
