@@ -104,20 +104,56 @@ mengandalkan perkiraan mata.
 
 ---
 
-## Deploy
+## Deploy — Vercel + Neon (gratis)
 
-Butuh database PostgreSQL yang bisa dijangkau (mis. Neon, Supabase, Railway) dan
-variabel `DATABASE_URL`. Terapkan migrasi dengan:
+Aplikasi ini butuh PostgreSQL, jadi host dan database disiapkan terpisah. Keduanya
+punya paket gratis yang cukup untuk pemakaian pribadi.
+
+### 1. Database — Neon
+
+1. Daftar di [neon.com](https://neon.com), buat project baru (region terdekat, mis. Singapore).
+2. Buka **Connect** dan salin **Direct connection** — bukan *Pooled connection*.
+   `prisma migrate deploy` tidak bisa lewat connection pooler.
+3. String-nya berbentuk:
+   `postgresql://USER:PASSWORD@ep-xxx.aws.neon.tech/design_studio?sslmode=require`
+
+### 2. Host — Vercel
+
+1. Daftar di [vercel.com](https://vercel.com) memakai akun GitHub Anda.
+2. **Add New → Project**, pilih repo `alengka_dsgn_manager`, klik Import.
+3. Sebelum Deploy, buka **Environment Variables** dan tambahkan:
+
+   | Nama | Nilai |
+   |---|---|
+   | `DATABASE_URL` | string Direct connection dari Neon |
+   | `NEXT_TRACE_UPLOAD_DISABLED` | `1` |
+
+4. Klik **Deploy**.
+
+Migrasi dijalankan otomatis saat build lewat script `vercel-build`
+(`prisma migrate deploy && next build`), jadi tabel dibuat pada deploy pertama.
+
+### 3. Mengisi data contoh (opsional)
+
+Setelah deploy pertama, dari komputer Anda:
 
 ```bash
-npm run db:deploy
+DATABASE_URL="<string Neon>" npx prisma db seed
 ```
 
-`db:deploy` hanya menjalankan migrasi yang belum diterapkan dan tidak pernah
-menghapus data, jadi aman dipakai pada saat rilis. Jangan pakai `db:push` di
-produksi — perintah itu menyamakan schema secara paksa tanpa mencatat riwayat.
+Hati-hati: seed **menghapus** seluruh isi tabel `projects` dan `categories` lebih dulu.
 
-> **Catatan build:** `next build` menulis berkas trace di `.next/`. Di sebagian
-> lingkungan (folder yang dikunci antivirus/penyimpanan awan) langkah itu gagal
-> dengan `EPERM ... .next/trace`. Setel `NEXT_TRACE_UPLOAD_DISABLED=1` untuk
-> melewatinya; CI sudah menyetelnya.
+### Catatan
+
+- **Jangan pakai `db:push` di produksi** — perintah itu menyamakan schema secara paksa
+  tanpa mencatat riwayat migrasi.
+- `db:deploy` hanya menjalankan migrasi yang belum diterapkan dan tidak pernah menghapus
+  data, jadi aman dipakai berulang.
+- **`next build` menulis berkas trace di `.next/`.** Di sebagian lingkungan (folder yang
+  dikunci antivirus atau penyimpanan awan) langkah itu gagal dengan
+  `EPERM ... .next/trace`. Setel `NEXT_TRACE_UPLOAD_DISABLED=1` untuk melewatinya;
+  CI dan Vercel sudah menyetelnya.
+- **Engine Prisma untuk Linux sudah disiapkan.** `binaryTargets` di `prisma/schema.prisma`
+  menyertakan `rhel-openssl-3.0.x` — runtime Vercel. Tanpa itu, build sukses tetapi
+  fungsi serverless gagal saat jalan dengan *"Query engine binary for current platform
+  could not be found"*.

@@ -1,5 +1,11 @@
 generator client {
   provider = "prisma-client-js"
+
+  /// Vercel menjalankan fungsi serverless di Amazon Linux (glibc, OpenSSL 3.0).
+  /// Tanpa target ini, Prisma Client yang di-generate bisa tidak menemukan query
+  /// engine saat runtime dan gagal dengan "Query engine binary for current
+  /// platform could not be found". `native` tetap disertakan untuk pemakaian lokal.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
