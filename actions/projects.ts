@@ -42,7 +42,7 @@ function toUiStatus(status: PrismaStatus): ProjectStatus {
 type PrismaProjectWithRelations = {
   id: string; projectTitle: string; clientId: string; categoryId: string
   price: number; status: PrismaStatus; deadline: Date; notes: string
-  previewImage: string | null; invoicedAt: Date | null
+  previewImage: string | null; completedAt: Date | null; invoicedAt: Date | null
   createdAt: Date; updatedAt: Date
   client: { id: string; name: string; contact: string; address: string; notes: string }
   category: { id: string; name: string; iconName: string }
@@ -61,6 +61,7 @@ function mapProject(p: PrismaProjectWithRelations): Project {
     deadline: p.deadline,
     notes: p.notes,
     previewImage: p.previewImage,
+    completedAt: p.completedAt,
     invoicedAt: p.invoicedAt,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
@@ -192,6 +193,7 @@ export async function createProject(data: ProjectFormData): Promise<ActionResult
         price: data.price,
         status: toPrismaStatus(data.status),
         deadline: new Date(data.deadline),
+        completedAt: data.status === "Done" ? new Date() : null,
         notes: data.notes?.trim() || "",
         previewImage: data.previewImage || null,
       },
@@ -211,6 +213,18 @@ export async function updateProject(id: string, data: ProjectFormData): Promise<
   if (relError) return { ok: false, error: relError }
 
   try {
+    const current = await prisma.project.findUnique({
+      where: { id },
+      select: { status: true, completedAt: true },
+    })
+    if (!current) return { ok: false, error: "Proyek sudah tidak ada." }
+
+    const completedAt = data.status !== "Done"
+      ? null
+      : current.status === PrismaStatus.Done
+        ? current.completedAt
+        : new Date()
+
     const p = await prisma.project.update({
       where: { id },
       data: {
@@ -220,6 +234,7 @@ export async function updateProject(id: string, data: ProjectFormData): Promise<
         price: data.price,
         status: toPrismaStatus(data.status),
         deadline: new Date(data.deadline),
+        completedAt,
         notes: data.notes?.trim() || "",
         previewImage: data.previewImage || null,
       },
@@ -248,9 +263,21 @@ export async function updateProjectStatus(
 ): Promise<ActionResult<Project>> {
   if (!isProjectStatus(status)) return { ok: false, error: "Status tidak dikenal." }
   try {
+    const current = await prisma.project.findUnique({
+      where: { id },
+      select: { status: true, completedAt: true },
+    })
+    if (!current) return { ok: false, error: "Proyek sudah tidak ada." }
+
+    const completedAt = status !== "Done"
+      ? null
+      : current.status === PrismaStatus.Done
+        ? current.completedAt
+        : new Date()
+
     const p = await prisma.project.update({
       where: { id },
-      data: { status: toPrismaStatus(status) },
+      data: { status: toPrismaStatus(status), completedAt },
       include: PROJECT_INCLUDE,
     })
     return { ok: true, data: mapProject(p) }

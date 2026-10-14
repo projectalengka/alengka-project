@@ -54,6 +54,8 @@ export interface Project {
   deadline: Date
   notes: string
   previewImage: string | null
+  /** Tanggal saat status proyek terakhir kali diubah menjadi Selesai. */
+  completedAt: Date | null
   /** Terisi bila proyek sudah pernah masuk ke sebuah invoice. */
   invoicedAt: Date | null
   createdAt: Date
@@ -78,8 +80,8 @@ export interface Category {
   _count?: { projects: number }
 }
 
-/** Tujuan navigasi. `board` adalah beranda baru (papan pipeline). */
-export type Tab = "board" | "clients" | "invoice" | "analytics" | "categories"
+/** Tujuan navigasi utama dan pengaturan. */
+export type Tab = "board" | "projects" | "clients" | "invoice" | "analytics" | "categories"
 
 export type ToastType = "success" | "warning" | "info"
 

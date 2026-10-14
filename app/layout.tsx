@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import "./globals.css"
+import { STUDIO } from "@/lib/studio"
 
 /*
  * Font dimuat lewat <link> ke Google Fonts, BUKAN next/font/google.
@@ -16,16 +17,15 @@ import "./globals.css"
  *  - display=swap memastikan teks tetap tampil dengan font fallback selama
  *    font asli diunduh.
  *
- * Playfair Display dipertahankan HANYA untuk varian miring (italic 400 & 600),
- * karena itulah yang dipakai logo "ds" di lembar PDF invoice. Varian tegak
- * (roman) tidak lagi diminta: aksen serif pada judul antarmuka sudah dibuang
- * saat perombakan tampilan, jadi mengunduhnya hanya membuang bandwidth.
- * Dengan cara ini format invoice tetap persis sama, tetapi permintaan font ke
- * Google berkurang dari 4 varian Playfair menjadi 2.
+ * Playfair Display TIDAK lagi dimuat. Dulu ia dipakai untuk monogram "ds" pada
+ * lembar invoice; sejak lembar itu memakai logo studio yang sebenarnya (berkas
+ * SVG di /public), tidak ada lagi teks serif di seluruh aplikasi. Permintaan
+ * font ke Google berkurang dari 3 keluarga menjadi 2, dan satu koneksi font
+ * hilang dari jalur kritis.
  */
 export const metadata: Metadata = {
-  title: "DESIGN STUDIO — Manajemen Proyek Desain",
-  description: "Catat dan kelola proyek desain freelance dengan mudah",
+  title: `${STUDIO.name} — Manajemen Proyek Desain`,
+  description: `Catat dan kelola proyek desain ${STUDIO.name} dengan mudah`,
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -39,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             halaman" tidak relevan di sini; ini bukan pages/_document. */}
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@1,400;1,600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
         />
         {/* Tema dipasang sebelum cat pertama supaya tidak ada kedipan putih
             saat mode gelap. Dijalankan inline, bukan di useEffect. */}

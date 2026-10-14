@@ -1,7 +1,8 @@
 "use client"
 
-import { LayoutGrid, Users, ReceiptText, BarChart3, Tags, Sun, Moon } from "lucide-react"
+import { House, BriefcaseBusiness, Users, ReceiptText, BarChart3, Tags, Sun, Moon } from "lucide-react"
 import type { Tab } from "@/types"
+import { STUDIO } from "@/lib/studio"
 
 interface SidebarProps {
   activeTab: Tab
@@ -13,21 +14,21 @@ interface SidebarProps {
 }
 
 /*
- * Navigasi baru mengikuti alur kerja, bukan struktur data:
- *   Papan    -> alur desain masuk sampai siap ditagih
- *   Klien    -> siapa yang dikerjakan
- *   Invoice  -> menagih
- *   Laporan  -> melihat hasil
- *   Kategori -> mengatur jenis layanan (jarang dipakai, ditaruh paling bawah)
+ * Navigasi diringkas mengikuti pekerjaan sehari-hari:
+ *   Beranda -> ringkasan penting
+ *   Proyek  -> semua order, status, harga, dan tanggal selesai
+ *   Klien   -> data pelanggan
+ *   Invoice -> pilih proyek, tinjau, lalu unduh
  */
-const PRIMARY_NAV: { id: Tab; label: string; icon: typeof LayoutGrid }[] = [
-  { id: "board", label: "Papan", icon: LayoutGrid },
+const PRIMARY_NAV: { id: Tab; label: string; icon: typeof House }[] = [
+  { id: "board", label: "Beranda", icon: House },
+  { id: "projects", label: "Proyek", icon: BriefcaseBusiness },
   { id: "clients", label: "Klien", icon: Users },
   { id: "invoice", label: "Invoice", icon: ReceiptText },
   { id: "analytics", label: "Laporan", icon: BarChart3 },
 ]
 
-const SECONDARY_NAV: { id: Tab; label: string; icon: typeof LayoutGrid }[] = [
+const SECONDARY_NAV: { id: Tab; label: string; icon: typeof House }[] = [
   { id: "categories", label: "Kategori", icon: Tags },
 ]
 
@@ -36,7 +37,7 @@ const MOBILE_NAV = [...PRIMARY_NAV, ...SECONDARY_NAV]
 function NavButton({
   label, icon: Icon, active, badge, onClick,
 }: {
-  label: string; icon: typeof LayoutGrid; active: boolean; badge?: number; onClick: () => void
+  label: string; icon: typeof House; active: boolean; badge?: number; onClick: () => void
 }) {
   return (
     <button
@@ -69,20 +70,17 @@ export default function Sidebar({
       {/* ---------------- Desktop: sidebar tetap ---------------- */}
       <aside className="hidden md:flex flex-col w-60 shrink-0 h-screen sticky top-0 bg-white dark:bg-[#0b0b0d] border-r border-neutral-200 dark:border-neutral-900">
         <div className="px-5 py-5 flex items-center gap-2.5">
-          <div
-            className="w-8 h-8 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center font-bold text-[13px] tracking-tight"
-            /* Padding asimetris menutup geseran optis monogram huruf besar.
-               Diukur dari piksel hasil render: "DS" duduk 0,67px terlalu tinggi
-               dan 0,33px terlalu ke kanan. Huruf besar tidak punya tinta di
-               bawah garis dasar, sehingga memusatkan kotak baris selalu
-               membuatnya tampak naik. Angka padding = dua kali geserannya,
-               karena padding menggeser kotak baris hanya setengahnya. */
-            style={{ paddingTop: "1.5px", paddingRight: "0.7px" }}
-          >
-            DS
-          </div>
-          <div className="leading-tight">
-            <p className="text-[13px] font-semibold text-neutral-900 dark:text-white">Design Studio</p>
+          {/* Logo studio menggantikan monogram huruf yang lama. Tinggi dipatok
+              dan lebar `auto`, jadi rasionya terjaga di ukuran apa pun.
+              Dua berkas dipakai supaya logo tetap kontras di mode terang
+              (tinta gelap) maupun mode gelap (tinta putih). */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- SVG statis
+              di /public; next/image tidak memberi nilai tambah untuknya. */}
+          <img src={STUDIO.logo} alt={`Logo ${STUDIO.name}`} className="h-7 w-auto shrink-0 dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={STUDIO.logoLight} alt="" className="hidden h-7 w-auto shrink-0 dark:block" />
+          <div className="leading-tight min-w-0">
+            <p className="text-[13px] font-semibold text-neutral-900 dark:text-white truncate">{STUDIO.name}</p>
             <p className="text-[10px] text-neutral-400 dark:text-neutral-500">Manajemen Proyek</p>
           </div>
         </div>

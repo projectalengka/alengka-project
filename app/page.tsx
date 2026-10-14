@@ -3,21 +3,22 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
 import type {
-  Project, Category, Client, Tab, ProjectFormData, ProjectStatus, DashboardPayload,
+  Project, Category, Client, ClientFormData, Tab, ProjectFormData, ProjectStatus, DashboardPayload,
 } from "@/types"
 import {
   getDashboardData, createProject, updateProject, deleteProject,
   updateProjectStatus, setProjectsInvoiced,
 } from "@/actions/projects"
+import { updateClient } from "@/actions/clients"
 import Sidebar from "@/components/layout/Sidebar"
-import SummaryStrip from "@/components/dashboard/SummaryStrip"
-import PipelineBoard from "@/components/board/PipelineBoard"
+import HomeOverview from "@/components/dashboard/HomeOverview"
 import ConfirmModal from "@/components/projects/ConfirmModal"
 import Toast, { type ToastType } from "@/components/ui/Toast"
 import ErrorBoundary from "@/components/ErrorBoundary"
 import { RefreshCw, Wifi, WifiOff } from "lucide-react"
 
 /* Tab yang tidak terlihat tidak perlu ikut di bundel awal. */
+const ProjectsWorkspace = dynamic(() => import("@/components/projects/ProjectsWorkspace"), { loading: () => <TabSkeleton /> })
 const AnalyticsSection = dynamic(() => import("@/components/dashboard/AnalyticsSection"), { loading: () => <TabSkeleton /> })
 const CategoryManager = dynamic(() => import("@/components/categories/CategoryManager"), { loading: () => <TabSkeleton /> })
 const ClientManager = dynamic(() => import("@/components/clients/ClientManager"), { loading: () => <TabSkeleton /> })
@@ -43,9 +44,10 @@ const EMPTY_STATS = {
 const POLL_INTERVAL_MS = 30_000
 
 const TAB_TITLE: Record<Tab, { title: string; subtitle: string }> = {
-  board: { title: "Papan Kerja", subtitle: "Dari desain masuk sampai siap ditagih" },
+  board: { title: "Beranda", subtitle: "Ringkasan pekerjaan dan hal yang perlu tindakan" },
+  projects: { title: "Proyek", subtitle: "Order berjalan dan riwayat proyek" },
   clients: { title: "Klien", subtitle: "Data klien & proyeknya" },
-  invoice: { title: "Invoice", subtitle: "Tagih proyek yang sudah selesai" },
+  invoice: { title: "Invoice", subtitle: "Pilih proyek, cek pratinjau, lalu unduh" },
   analytics: { title: "Laporan", subtitle: "Nilai yang sudah ditagih" },
   categories: { title: "Kategori", subtitle: "Jenis layanan desain" },
 }
@@ -192,35 +194,26 @@ export default function Home() {
     return true
   }, [projectToEdit, triggerToast, loadData])
 
-  const handleStatusChange = useCallback(async (id: string, status: ProjectStatus) => {
-    /* Optimistis: ubah di layar dulu, kembalikan bila gagal.
-       Rollback sengaja hanya menyentuh SATU proyek (bukan menimpa seluruh
-       array dengan snapshot lama) — kalau tidak, perubahan status lain yang
-       berhasil di sela-sela akan ikut terhapus. */
-    let previousStatus: ProjectStatus | undefined
-    setProjects((prev) => prev.map((p) => {
-      if (p.id !== id) return p
-      previousStatus = p.status
-      return { ...p, status }
-    }))
-    const res = await updateProjectStatus(id, status)
-    if (!res.ok) {
-      if (previousStatus !== undefined) {
-        setProjects((prev) => prev.map((p) =>
-          p.id === id ? { ...p, status: previousStatus as ProjectStatus } : p,
-        ))
-      }
-      triggerToast(res.error, "warning")
-      return
-    }
-    triggerToast(`Status dipindah ke ${status}.`)
-    void loadData({ silent: true })
-  }, [triggerToast, loadData])
-
   const handleEditClick = useCallback((project: Project) => {
     setProjectToEdit(project)
     setFormOpen(true)
   }, [])
+
+  const handleQuickStatusChange = useCallback(async (id: string, status: ProjectStatus): Promise<boolean> => {
+    try {
+      const res = await updateProjectStatus(id, status)
+      if (!res.ok) {
+        triggerToast(res.error, "warning")
+        return false
+      }
+      triggerToast(`Status proyek diperbarui menjadi ${status === "On Progress" ? "Dikerjakan" : status === "Done" ? "Selesai" : status === "Cancel" ? "Dibatalkan" : status}.`)
+      void loadData({ silent: true })
+      return true
+    } catch {
+      triggerToast("Status gagal diperbarui. Coba lagi.", "warning")
+      return false
+    }
+  }, [triggerToast, loadData])
 
   const handleDeleteClick = useCallback((project: Project) => {
     setProjectToDelete(project)
@@ -257,6 +250,18 @@ export default function Home() {
   const openInvoiceFor = useCallback((clientId: string, projectIds: string[]) => {
     setInvoiceTarget({ clientId, projectIds })
   }, [])
+
+  const handleSaveInvoiceClient = useCallback(async (data: ClientFormData): Promise<boolean> => {
+    if (!invoiceTarget) return false
+    const res = await updateClient(invoiceTarget.clientId, data)
+    if (!res.ok) {
+      triggerToast(res.error, "warning")
+      return false
+    }
+    triggerToast("Data klien diperbarui.")
+    void loadData({ silent: true })
+    return true
+  }, [invoiceTarget, triggerToast, loadData])
 
   /* ------------------------------------------------------------- turunan --- */
 
@@ -361,17 +366,23 @@ export default function Home() {
 
           <div className="p-4 md:p-6 space-y-4">
             {activeTab === "board" && (
-              <>
-                <SummaryStrip stats={stats} onOpenInvoice={() => setActiveTab("invoice")} />
-                <PipelineBoard
-                  projects={projects}
-                  onEdit={handleEditClick}
-                  onDelete={handleDeleteClick}
-                  onStatusChange={handleStatusChange}
-                  onInvoice={(p) => openInvoiceFor(p.clientId, [p.id])}
-                  onNewProject={() => { setProjectToEdit(null); setFormOpen(true) }}
-                />
-              </>
+              <HomeOverview
+                projects={projects}
+                stats={stats}
+                clientCount={clients.length}
+                onOpenProjects={() => setActiveTab("projects")}
+                onOpenInvoice={() => setActiveTab("invoice")}
+                onNewProject={() => { setProjectToEdit(null); setFormOpen(true) }}
+              />
+            )}
+
+            {activeTab === "projects" && (
+              <ProjectsWorkspace
+                projects={projects}
+                onEdit={handleEditClick}
+                onDelete={handleDeleteClick}
+                onStatusChange={handleQuickStatusChange}
+              />
             )}
 
             {activeTab === "clients" && (
@@ -398,9 +409,6 @@ export default function Home() {
                 clients={clients}
                 projects={projects}
                 onOpenInvoice={openInvoiceFor}
-                onUnmark={(ids) => handleSetInvoiced(ids, false)}
-                onMark={(ids) => handleSetInvoiced(ids, true)}
-                onGoToBoard={() => setActiveTab("board")}
               />
             )}
 
@@ -441,9 +449,11 @@ export default function Home() {
             onClose={() => setInvoiceTarget(null)}
             client={invoiceClient}
             projects={invoiceProjects}
+            onSaveClient={handleSaveInvoiceClient}
             onGenerated={(ids) => {
               setInvoiceTarget(null)
-              void handleSetInvoiced(ids, true)
+              const unbilledIds = projects.filter((project) => ids.includes(project.id) && !project.invoicedAt).map((project) => project.id)
+              if (unbilledIds.length > 0) void handleSetInvoiced(unbilledIds, true)
             }}
           />
         )}

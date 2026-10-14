@@ -59,6 +59,10 @@ model Project {
   notes        String        @default("") @db.Text
   previewImage String?       @db.Text
 
+  /// Waktu status proyek pertama kali/terakhir kali diubah menjadi Done.
+  /// Nullable agar tanggal proyek lama tidak direka bila riwayatnya tidak tersedia.
+  completedAt DateTime?
+
   /// Penanda proyek sudah masuk ke sebuah invoice.
   ///
   /// Invoice sendiri sengaja TIDAK disimpan sebagai tabel (keputusan pemilik

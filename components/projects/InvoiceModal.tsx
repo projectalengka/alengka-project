@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import type { Project, Client } from "@/types"
-import { X, Printer, Landmark, Loader2, Edit3, Plus, Minus } from "lucide-react"
+import type { Project, Client, ClientFormData } from "@/types"
+import { X, Printer, Loader2, Edit3, Plus, Minus, Eye, ArrowLeft, Download, Save, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { replaceOklchColors } from "@/lib/print-colors"
 import { useEscape } from "@/lib/use-escape"
+import { STUDIO } from "@/lib/studio"
 
 /** Tanggal lokal dalam format "YYYY-MM-DD" untuk <input type="date">. */
 function isoDate(offsetDays = 0): string {
@@ -21,15 +22,14 @@ interface InvoiceModalProps {
   client: Client | null
   /** Proyek yang masuk ke invoice ini. */
   projects: Project[]
-  /**
-   * Dipanggil setelah PDF benar-benar tersimpan. Dipakai untuk menandai proyek
-   * sebagai "sudah ditagih" supaya tidak ikut tertagih lagi pada invoice berikutnya.
-   */
+  /** Menyimpan perubahan identitas klien ke data klien tersimpan. */
+  onSaveClient?: (data: ClientFormData) => Promise<boolean>
+  /** Dipanggil setelah PDF benar-benar tersimpan. */
   onGenerated?: (projectIds: string[]) => void
 }
 
 export default function InvoiceModal({
-  isOpen, onClose, client, projects, onGenerated,
+  isOpen, onClose, client, projects, onSaveClient, onGenerated,
 }: InvoiceModalProps) {
   /* Nilai awal langsung diisi (lazy initializer), bukan "". Dulu state tanggal
      mulai dari "" dan baru diisi oleh useEffect SETELAH render pertama —
@@ -50,9 +50,14 @@ export default function InvoiceModal({
   const [taxPercent, setTaxPercent] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
+  const [isSavingClient, setIsSavingClient] = useState(false)
   const [progress, setProgress] = useState(0)
   const [previewScale, setPreviewScale] = useState(1)
+  const [zoomFactor, setZoomFactor] = useState(1)
+  const [step, setStep] = useState<"edit" | "review">("edit")
+  const [pdfError, setPdfError] = useState("")
   const sheetRef = useRef<HTMLDivElement>(null)
+  const logoRef = useRef<HTMLImageElement>(null)
   const previewContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -60,12 +65,15 @@ export default function InvoiceModal({
     if (!container || !isOpen) return
 
     const updateScale = () => {
-      const pad = 48
-      const availW = container.clientWidth - pad
-      const availH = container.clientHeight - pad
+      const horizontalPadding = 40
+      const toolbarAndPadding = 88
+      const availW = Math.max(0, container.clientWidth - horizontalPadding)
+      const availH = Math.max(0, container.clientHeight - toolbarAndPadding)
       const pxPerMm = 96 / 25.4
       const sheetW = 210 * pxPerMm
       const sheetH = 297 * pxPerMm
+      // Fit-to-view begins by fitting both page dimensions; manual zoom then
+      // scales that fit size while the scroll viewport exposes the whole page.
       const s = Math.min(availW / sheetW, availH / sheetH, 1)
       setPreviewScale(Math.max(s, 0.25))
     }
@@ -111,6 +119,10 @@ export default function InvoiceModal({
 
   if (!isOpen || projects.length === 0) return null
 
+  const renderedScale = previewScale * zoomFactor
+  const zoomPercent = Math.round(zoomFactor * 100)
+  const setClampedZoom = (next: number) => setZoomFactor(Math.min(3, Math.max(0.5, next)))
+
   const subtotal = projects.reduce((acc, p) => acc + p.price, 0)
   const taxAmount = (subtotal * taxPercent) / 100
   /* Diskon dibatasi pada subtotal + pajak. Sebelumnya hanya dijaga >= 0,
@@ -120,7 +132,30 @@ export default function InvoiceModal({
   const safeDiscount = Math.min(Math.max(0, discountAmount), maxDiscount)
   const totalAmount = subtotal + taxAmount - safeDiscount
 
-  const handlePrint = async () => {
+  const clientChanged = !!client && (
+    clientName !== client.name || clientContact !== client.contact || clientAddress !== client.address
+  )
+
+  const handleSaveClient = async () => {
+    if (!client || !onSaveClient || !clientChanged || isSavingClient) return
+    setIsSavingClient(true)
+    try {
+      await onSaveClient({
+        name: clientName.trim(),
+        contact: clientContact.trim(),
+        address: clientAddress.trim(),
+        notes: client.notes,
+      })
+    } finally {
+      setIsSavingClient(false)
+    }
+  }
+
+  const handleDownload = async () => {
+    if (step !== "review" || isGeneratingPdf) return
+    setPdfError("")
+    let overflowTarget: HTMLElement | null = null
+    let previousOverflow = ""
     setIsGeneratingPdf(true)
     setProgress(10)
     try {
@@ -132,10 +167,10 @@ export default function InvoiceModal({
       const element = sheetRef.current
       if (!element) { setIsGeneratingPdf(false); return }
 
-      // temporarily make overflow visible so html2canvas captures full element
-      const previewEl = element.closest("[class*='overflow']") as HTMLElement | null
-      const origOverflow = previewEl?.style.overflow ?? ""
-      if (previewEl) previewEl.style.overflow = "visible"
+      // Temporarily show the full sheet for html2canvas; always restore it below.
+      overflowTarget = element.closest("[class*='overflow']") as HTMLElement | null
+      previousOverflow = overflowTarget?.style.overflow ?? ""
+      if (overflowTarget) overflowTarget.style.overflow = "visible"
 
       const canvas = await html2canvas(element, {
         scale: 2,
@@ -168,9 +203,56 @@ export default function InvoiceModal({
         },
       })
 
-      // restore overflow
-      if (previewEl) previewEl.style.overflow = origOverflow
+      if (overflowTarget) overflowTarget.style.overflow = previousOverflow
+      overflowTarget = null
       setProgress(70)
+
+      /* Logo ditempel TERPISAH ke kanvas hasil tangkapan.
+       *
+       * Sebabnya ditemukan dengan mengukur piksel, bukan membaca kode:
+       * html2canvas 1.4.1 memang menggambar <img> dengan benar saat elemen
+       * yang ditangkap kecil (diuji: 400x200 px) dan juga saat menangkap
+       * lembar setinggi 1500 px. Tetapi begitu yang ditangkap adalah lembar
+       * penuh berukuran A4 (210mm x 297mm) pada scale 2 (kanvas ~1588x2246),
+       * setiap isi <img> HILANG tanpa pesan apa pun — logo SVG, logo PNG,
+       * maupun data URL, semuanya menghasilkan nol piksel tinta. Jadi ini
+       * batas html2canvas, bukan kesalahan berkas logo: logo yang digambar
+       * sendiri ke kanvas selalu benar (diuji: 52.096 piksel tinta).
+       *
+       * Solusinya: logo digambar ulang ke kanvas yang sudah jadi, pada posisi
+       * yang diukur langsung dari DOM sehingga tidak mungkin meleset dari
+       * tempatnya di lembar. Kapsul pembungkusnya bukan gambar, jadi tetap
+       * ikut tertangkap html2canvas — hanya tinta logonya yang perlu ditempel.
+       */
+      const logoEl = logoRef.current
+      if (logoEl && logoEl.complete && logoEl.naturalWidth > 0) {
+        const sheetRect = element.getBoundingClientRect()
+        const logoRect = logoEl.getBoundingClientRect()
+        const ratio = canvas.width / sheetRect.width
+
+        /* `decode()` memastikan bitmap SVG sudah siap sebelum digambar.
+           Tanpa menunggunya, `drawImage` bisa menghasilkan bidang kosong pada
+           peramban yang belum menyelesaikan dekode. Kalau API-nya tidak ada
+           (atau decode gagal), elemen gambar yang sudah `complete` tetap
+           dipakai — bukan kondisi gagal. */
+        const logoImage = logoEl
+        try {
+          await logoImage.decode?.()
+        } catch {
+          /* Abaikan: `complete` + `naturalWidth > 0` sudah cukup untuk digambar. */
+        }
+
+        const ctx = canvas.getContext("2d")
+        if (ctx) {
+          ctx.drawImage(
+            logoImage,
+            (logoRect.left - sheetRect.left) * ratio,
+            (logoRect.top - sheetRect.top) * ratio,
+            logoRect.width * ratio,
+            logoRect.height * ratio,
+          )
+        }
+      }
 
       const imgData = canvas.toDataURL("image/png")
 
@@ -214,8 +296,9 @@ export default function InvoiceModal({
       onGenerated?.(projects.map((p) => p.id))
     } catch (error) {
       console.error("PDF failed:", error)
-      window.print()
+      setPdfError("PDF belum berhasil dibuat. Pratinjau dan perubahan Anda tetap aman; coba unduh lagi.")
     } finally {
+      if (overflowTarget) overflowTarget.style.overflow = previousOverflow
       setIsGeneratingPdf(false)
       setProgress(0)
     }
@@ -228,51 +311,61 @@ export default function InvoiceModal({
         {/* === HEADER === */}
         <div className="flex items-center justify-between px-5 md:px-7 py-3.5 border-b border-neutral-200 dark:border-neutral-900 bg-white dark:bg-[#0d0d0f]/80 sticky top-0 z-10 print:hidden">
           <div className="flex items-center gap-3">
-            <div className="p-1.5 px-2.5 bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 text-[9px] font-semibold rounded-md uppercase tracking-wider shadow-xs">
-              DS
-            </div>
+            {/* Logo studio pada bilah alat. `alt` sengaja kosong: nama studio
+                sudah dibaca sebagai teks di sebelahnya, jadi membacakannya lagi
+                hanya menambah derau bagi pembaca layar. */}
+            {/* eslint-disable-next-line @next/next/no-img-element -- berkas SVG
+                statis di /public; optimasi next/image tidak berlaku untuk SVG
+                dan tidak diperlukan di sini. */}
+            <img
+              src={STUDIO.logo}
+              alt=""
+              className="h-4 w-auto shrink-0 dark:hidden"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={STUDIO.logoLight}
+              alt=""
+              className="hidden h-4 w-auto shrink-0 dark:block"
+            />
             <div>
               <h2 className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
                 <Printer className="w-3.5 h-3.5 text-neutral-400" />
                 Invoice
               </h2>
               <p className="text-[9.5px] text-neutral-400 dark:text-neutral-500">
-                {projects.length} proyek ditagih &middot; Total <span className="font-semibold text-neutral-700 dark:text-neutral-300">{formatCurrency(totalAmount)}</span>
+                <span className="sm:hidden">{projects.length} order · {formatCurrency(totalAmount)}</span>
+                <span className="hidden sm:inline">{step === "edit" ? "Langkah 1 · Atur data dan koreksi" : "Langkah 2 · Periksa sebelum unduh"} · {projects.length} proyek · {formatCurrency(totalAmount)}</span>
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {step === "review" && (
+              <button onClick={() => setStep("edit")} aria-label="Kembali koreksi" disabled={isGeneratingPdf} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 dark:text-neutral-300 dark:hover:bg-neutral-900 sm:px-3">
+                <ArrowLeft className="h-4 w-4" /><span className="hidden sm:inline">Kembali koreksi</span>
+              </button>
+            )}
             <button
-              onClick={handlePrint}
+              onClick={step === "edit" ? () => setStep("review") : handleDownload}
+              aria-label={step === "edit" ? "Periksa pratinjau" : "Unduh PDF"}
               disabled={isGeneratingPdf}
-              className="px-4 py-2 bg-neutral-950 dark:bg-white hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-60 text-white dark:text-neutral-950 font-semibold rounded-xl text-xs flex items-center gap-2 transition cursor-pointer active:scale-[0.97] shadow-xs"
+              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-neutral-950 px-3 text-[11px] font-semibold text-white shadow-xs transition-colors hover:bg-neutral-800 disabled:opacity-60 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200 sm:gap-2 sm:px-4 sm:text-xs"
             >
-              {isGeneratingPdf ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span className="flex items-center gap-1.5">
-                    {progress < 70 ? "Merender..." : progress < 90 ? "Menyusun PDF..." : "Menyimpan..."}
-                    <span className="text-[9px] opacity-60 font-mono">{progress}%</span>
-                  </span>
-                </>
-              ) : (
-                <><Printer className="w-3.5 h-3.5" /> Cetak PDF</>
-              )}
+              {isGeneratingPdf ? <><Loader2 className="h-4 w-4 animate-spin" /><span className="hidden sm:inline">{progress < 70 ? "Merender..." : progress < 90 ? "Menyusun PDF..." : "Menyimpan..."} {progress}%</span></> : step === "edit" ? <><Eye className="h-4 w-4" /><span className="hidden sm:inline">Periksa pratinjau</span><span className="sm:hidden">Cek</span></> : <><Download className="h-4 w-4" /><span className="hidden sm:inline">Unduh PDF</span><span className="sm:hidden">PDF</span></>}
             </button>
-            <button
-              onClick={onClose}
-              className="p-2 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-xl transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
+            <button onClick={onClose} aria-label="Tutup invoice" className="rounded-xl bg-neutral-100 p-2 text-neutral-500 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800">
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
         {/* === BODY === */}
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        {pdfError && <p role="alert" className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">{pdfError}</p>}
+
+        <div className={`flex-1 min-h-0 flex flex-col ${step === "edit" ? "lg:flex-row" : ""} overflow-hidden`}>
 
           {/* === SIDEBAR SETTINGS === */}
-          <div className="lg:w-80 bg-white dark:bg-[#0d0d0f]/30 border-b lg:border-b-0 lg:border-r border-neutral-200 dark:border-neutral-900/60 p-5 space-y-5 print:hidden shrink-0 overflow-y-auto">
+          {step === "edit" && <div className="lg:w-80 bg-white dark:bg-[#0d0d0f]/30 border-b lg:border-b-0 lg:border-r border-neutral-200 dark:border-neutral-900/60 p-5 space-y-5 print:hidden shrink-0 max-h-[42vh] lg:max-h-none overflow-y-auto">
             <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest text-neutral-400 dark:text-neutral-500">
               <Edit3 className="w-3 h-3" />
               Atur Invoice
@@ -316,6 +409,12 @@ export default function InvoiceModal({
                 <textarea value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} rows={2} placeholder="Opsional"
                   className="w-full bg-[#f5f5f7] dark:bg-[#121214]/60 border border-neutral-200/60 dark:border-neutral-850/40 rounded-lg px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors resize-none" />
               </div>
+              {onSaveClient && (
+                <button type="button" onClick={handleSaveClient} disabled={!clientChanged || isSavingClient} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-neutral-200 px-3 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-900">
+                  {isSavingClient ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  Simpan perubahan klien
+                </button>
+              )}
 
               <hr className="border-neutral-100 dark:border-neutral-900/60" />
 
@@ -384,20 +483,77 @@ export default function InvoiceModal({
                 </div>
               </div>
             </div>
-          </div>
+          </div>}
+
+          {step === "review" && (
+            <div className="flex items-center justify-between gap-3 border-b border-neutral-200 bg-white px-4 py-2.5 text-[11px] text-neutral-600 dark:border-neutral-900 dark:bg-[#111113] dark:text-neutral-300">
+              <span>Pastikan nama klien, tanggal, daftar order, dan total sudah benar.</span>
+              <span className="shrink-0 font-semibold">{projects.length} order · {formatCurrency(totalAmount)}</span>
+            </div>
+          )}
 
           {/* === INVOICE PREVIEW === */}
           <div
             ref={previewContainerRef}
-            className="flex-1 bg-[#f0f0f2] dark:bg-[#0a0a0c] p-4 md:p-6 overflow-auto min-w-0"
+            className="flex-1 min-h-0 bg-[#f0f0f2] dark:bg-[#0a0a0c] p-3 sm:p-4 md:p-6 overflow-auto min-w-0"
           >
+            <div className="sticky top-0 z-10 mx-auto mb-3 flex w-fit max-w-full items-center gap-1.5 rounded-2xl border border-neutral-200 bg-white/95 p-1.5 shadow-lg dark:border-neutral-700 dark:bg-[#151518]/95">
+              <span className="hidden px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-400 sm:inline">Zoom</span>
+              <button
+                type="button"
+                onClick={() => setClampedZoom(zoomFactor - 0.1)}
+                disabled={zoomFactor <= 0.5}
+                aria-label="Perkecil pratinjau invoice"
+                title="Perkecil"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-neutral-600 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-35 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                <ZoomOut className="h-4 w-4" />
+              </button>
+              <output aria-live="polite" aria-label={`Zoom ${zoomPercent} persen`} className="min-w-[48px] text-center font-mono text-xs font-semibold tabular-nums text-neutral-800 dark:text-neutral-100">
+                {zoomPercent}%
+              </output>
+              <button
+                type="button"
+                onClick={() => setClampedZoom(zoomFactor + 0.1)}
+                disabled={zoomFactor >= 3}
+                aria-label="Perbesar pratinjau invoice"
+                title="Perbesar"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-neutral-600 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-35 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </button>
+              <input
+                type="range"
+                min={50}
+                max={300}
+                step={5}
+                value={zoomPercent}
+                onChange={(event) => setClampedZoom(Number(event.target.value) / 100)}
+                aria-label="Atur perbesaran pratinjau invoice"
+                title="Geser untuk mengatur perbesaran"
+                className="mx-1 h-1.5 w-14 cursor-pointer accent-violet-600 sm:w-20 md:w-32"
+              />
+              <span className="mx-0.5 h-6 w-px bg-neutral-200 dark:bg-neutral-700" />
+              <button
+                type="button"
+                onClick={() => setZoomFactor(1)}
+                disabled={zoomFactor === 1}
+                aria-label="Sesuaikan pratinjau ke layar"
+                title="Kembalikan ke ukuran pas layar"
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl px-2.5 text-[10px] font-semibold text-neutral-600 transition-colors hover:bg-neutral-100 disabled:cursor-default disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Pas</span>
+              </button>
+            </div>
             <div
               style={{
-                width: previewScale < 1 ? `${210 * previewScale}mm` : "210mm",
-                height: previewScale < 1 ? `${297 * previewScale}mm` : "297mm",
+                width: `${210 * renderedScale}mm`,
+                height: `${297 * renderedScale}mm`,
                 overflow: "hidden",
                 margin: "0 auto",
                 position: "relative",
+                transition: "width 120ms ease-out, height 120ms ease-out",
               }}
             >
               <div
@@ -406,140 +562,168 @@ export default function InvoiceModal({
                 style={{
                   width: "210mm",
                   minHeight: "297mm",
-                  padding: "18mm 16mm 12mm",
+                  padding: "18mm 16mm 14mm",
                   fontFamily: "'Inter', 'Helvetica Neue', Arial, sans-serif",
                   fontSize: "9pt",
                   lineHeight: "1.5",
                   transformOrigin: "top left",
-                  transform: previewScale < 1 ? `scale(${previewScale})` : "none",
+                  transform: `scale(${renderedScale})`,
                   position: "absolute",
                   top: 0,
                   left: 0,
+                  /* Flex kolom setinggi halaman.
+                   *
+                   * Sebelumnya blok-blok hanya ditumpuk lalu berhenti: pada
+                   * invoice 3 baris hasilnya menyisakan ~80 mm ruang kosong di
+                   * bawah (terukur, bukan perkiraan) sehingga lembar tampak
+                   * menggantung di atas halaman. Dengan kolom flex, isi
+                   * didorong mengisi tinggi kertas dan catatan kaki menempel
+                   * pada margin bawah, jadi proporsinya tetap enak dilihat
+                   * baik untuk 1 baris order maupun 12 baris. */
+                  display: "flex",
+                  flexDirection: "column",
+                  boxSizing: "border-box",
                 }}
               >
 
               {/* TOP DECORATIVE LINE */}
               <div style={{ height: "3px", background: "linear-gradient(90deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)", borderRadius: "2px", marginBottom: "20px" }} />
 
-              {/* HEADER */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                    <div style={{
-                      width: "32px", height: "32px",
-                      background: "#1a1a2e", color: "#ffffff",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      borderRadius: "6px",
-                      fontFamily: "'Playfair Display', Georgia, serif",
-                      fontStyle: "italic", fontWeight: 700,
-                      fontSize: "12px",
-                      lineHeight: 1,
-                      /*
-                       * Monogram "ds" dipusatkan secara OPTIS, bukan sekadar
-                       * memusatkan kotak baris.
-                       *
-                       * Tiga hal yang salah sebelumnya, semuanya ditemukan dengan
-                       * MENGUKUR piksel hasil render — bukan dengan membaca kode:
-                       *  1. `letterSpacing: "2px"` menambah ruang setelah huruf
-                       *     terakhir, sehingga tinta terdorong 1,24px ke kiri.
-                       *     Kelas spasi itu dihapus, tidak dikompensasi.
-                       *  2. `lineHeight` bawaan menyisakan ruang mati di bawah
-                       *     huruf italic tanpa ekor, sehingga tinta duduk rendah.
-                       *  3. Sisa geseran ditutup padding asimetris di bawah.
-                       *
-                       * Padding dipakai, bukan `transform`, karena lembar ini
-                       * diraster html2canvas saat membuat PDF — properti tata
-                       * letak dihormati tanpa syarat, sedangkan dukungan
-                       * transform pada html2canvas tidak bisa diandalkan.
-                       *
-                       * Angkanya hasil pengukuran: 0,53px ke kanan dan 1,07px ke
-                       * bawah dari titik tengah. Karena padding menggeser kotak
-                       * baris sebesar setengah nilainya, angkanya dikali dua.
-                       * Berlaku untuk metrik Playfair Display italic; kalau font
-                       * ini diganti, ukur ulang.
-                       */
-                      paddingRight: "1.1px",
-                      paddingBottom: "3.1px",
-                    }}>ds</div>
+              {/* KEPALA LEMBAR
+                  Sisi kiri: logo studio asli (ALENGKA) beserta identitasnya.
+                  Sisi kanan: judul INVOICE dan nomornya.
+
+                  Kedua sisi disejajarkan pada garis atas yang sama
+                  (`alignItems: "flex-start"`), dan logo diberi `display:block`
+                  supaya tidak menyisakan celah baseline yang membuatnya tampak
+                  melayang beberapa piksel lebih rendah dari teks di kanannya.
+                  Tinggi logo dipatok dan lebarnya dihitung `auto`, sehingga
+                  rasionya (3,1789 : 1) tidak pernah terdistorsi berapa pun
+                  lebar halamannya. */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "24px", marginBottom: "26px" }}>
+                <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                  {/* Logo di dalam "kapsul" tipis supaya tingginya terukur dan
+                      tepinya rapi terhadap margin kiri lembar.
+                      Tinggi dinaikkan ke 34px: pada 26px detail bersudut khas
+                      wordmark ALENGKA (rasio 3,18:1, jadi hanya ~83px lebar)
+                      hilang dan logonya tampak sekadar bercak kecil. */}
+                  <div style={{
+                    display: "inline-flex", alignItems: "center",
+                    padding: "8px 14px",
+                    border: "1px solid #ececef",
+                    borderRadius: "8px",
+                    background: "#fcfcfd",
+                    marginBottom: "13px",
+                  }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element --
+                        SVG statis; sengaja NOT raster, supaya tepinya tetap
+                        tajam di PDF maupun saat dicetak. */}
+                    <img
+                      ref={logoRef}
+                      src={STUDIO.logo}
+                      alt={`Logo ${STUDIO.name}`}
+                      style={{ display: "block", height: "34px", width: "auto" }}
+                    />
+                  </div>
+
+                  <div style={{ fontSize: "11.5pt", fontWeight: 800, letterSpacing: "0.6px", color: "#111827", lineHeight: 1.25 }}>
+                    {STUDIO.name}
+                  </div>
+                  <div style={{ fontSize: "7.5pt", color: "#8b8b93", marginTop: "1px" }}>
+                    {STUDIO.tagline}
+                  </div>
+
+                  {/* Blok kontak memakai satu garis pemisah di tengah agar
+                      alamat dan kontak terpisah jelas tanpa menambah baris. */}
+                  <div style={{ fontSize: "7.5pt", color: "#8b8b93", marginTop: "8px", lineHeight: "1.6" }}>
+                    <div>{STUDIO.city}</div>
                     <div>
-                      <div style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase" }}>Design Studio</div>
-                      <div style={{ fontSize: "7.5pt", color: "#888" }}>Creative Design Solutions</div>
+                      {STUDIO.email}
+                      <span style={{ color: "#d4d4d8", margin: "0 6px" }}>|</span>
+                      {STUDIO.phone}
                     </div>
                   </div>
-                  <div style={{ fontSize: "7.5pt", color: "#999", marginTop: "4px", lineHeight: "1.6" }}>
-                    <div>Graha Desain Kreatif, Jakarta Raya (12160)</div>
-                    <div>studio@example.com | +62 812-3456-7890</div>
-                  </div>
                 </div>
-                <div style={{ textAlign: "right" }}>
+
+                <div style={{ textAlign: "right", flex: "0 0 auto" }}>
                   <div style={{
-                    fontSize: "22pt", fontWeight: 800, letterSpacing: "4px",
-                    color: "#1a1a2e", lineHeight: "1",
+                    fontSize: "26pt", fontWeight: 800, letterSpacing: "3px",
+                    color: "#111827", lineHeight: "0.95",
                   }}>INVOICE</div>
-                  <div style={{ fontSize: "7.5pt", color: "#aaa", marginTop: "6px", fontFamily: "'JetBrains Mono', monospace" }}>
-                    No: <span style={{ fontWeight: 600, color: "#555" }}>{invoiceNo}</span>
+                  <div style={{ fontSize: "7.5pt", color: "#a1a1aa", marginTop: "8px" }}>
+                    No.
+                    <span style={{
+                      marginLeft: "5px", fontWeight: 600, color: "#3f3f46",
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>{invoiceNo}</span>
                   </div>
                 </div>
               </div>
 
-              {/* DIVIDER */}
-              <div style={{ height: "1px", background: "#eee", marginBottom: "20px" }} />
+              {/* PEMISAH */}
+              <div style={{ height: "1px", background: "#ececef", marginBottom: "22px" }} />
 
-              {/* BILL TO / DATES */}
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "28px" }}>
-                <div style={{ maxWidth: "55%" }}>
-                  <div style={{ fontSize: "6.5pt", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", color: "#aaa", marginBottom: "8px" }}>Ditagihkan Kepada</div>
-                  <div style={{ fontSize: "10pt", fontWeight: 700, color: "#1a1a2e", marginBottom: "2px" }}>{clientName}</div>
-                  {clientContact && <div style={{ fontSize: "7.5pt", color: "#888" }}>{clientContact}</div>}
-                  {clientAddress && <div style={{ fontSize: "7.5pt", color: "#888", marginTop: "2px", maxWidth: "260px" }}>{clientAddress}</div>}
+              {/* DITAGIHKAN KEPADA / TANGGAL */}
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "24px", marginBottom: "26px" }}>
+                <div style={{ maxWidth: "55%", minWidth: 0 }}>
+                  <div style={{ fontSize: "6.5pt", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", color: "#a1a1aa", marginBottom: "7px" }}>Ditagihkan Kepada</div>
+                  <div style={{ fontSize: "10pt", fontWeight: 700, color: "#111827", marginBottom: "2px" }}>{clientName}</div>
+                  {clientContact && <div style={{ fontSize: "7.5pt", color: "#8b8b93" }}>{clientContact}</div>}
+                  {clientAddress && <div style={{ fontSize: "7.5pt", color: "#8b8b93", marginTop: "2px", maxWidth: "260px" }}>{clientAddress}</div>}
                 </div>
-                <div style={{ textAlign: "right", fontSize: "7.5pt" }}>
-                  <div style={{ fontSize: "6.5pt", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", color: "#aaa", marginBottom: "8px" }}>Tanggal</div>
-                  <div style={{ color: "#666", marginBottom: "2px" }}>
-                    Terbit: <span style={{ fontWeight: 600, color: "#444", fontFamily: "'JetBrains Mono', monospace" }}>{formatDate(issueDate)}</span>
+                <div style={{ textAlign: "right", fontSize: "7.5pt", flex: "0 0 auto" }}>
+                  <div style={{ fontSize: "6.5pt", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", color: "#a1a1aa", marginBottom: "7px" }}>Tanggal</div>
+                  <div style={{ color: "#71717a", marginBottom: "2px" }}>
+                    Terbit: <span style={{ fontWeight: 600, color: "#3f3f46", fontFamily: "'JetBrains Mono', monospace" }}>{formatDate(issueDate)}</span>
                   </div>
-                  <div style={{ color: "#666" }}>
-                    Jatuh Tempo: <span style={{ fontWeight: 600, color: "#444", fontFamily: "'JetBrains Mono', monospace" }}>{formatDate(dueDate)}</span>
+                  <div style={{ color: "#71717a" }}>
+                    Jatuh Tempo: <span style={{ fontWeight: 600, color: "#3f3f46", fontFamily: "'JetBrains Mono', monospace" }}>{formatDate(dueDate)}</span>
                   </div>
                 </div>
               </div>
 
-              {/* TABLE */}
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt", marginBottom: "24px" }}>
+              {/* TABEL ORDER */}
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt", marginBottom: "22px", tableLayout: "fixed" }}>
+                {/* Lebar kolom dipatok (`tableLayout: fixed`) supaya kolom Proyek
+                    tidak pernah melar menggeser kolom Harga — inilah yang dulu
+                    membuat judul panjang dan angka rupiah berdesakan. */}
+                <colgroup>
+                  <col style={{ width: "34px" }} />
+                  <col />
+                  <col style={{ width: "26%" }} />
+                  <col style={{ width: "108px" }} />
+                </colgroup>
                 <thead>
                   <tr style={{
-                    borderBottom: "2px solid #1a1a2e",
+                    borderBottom: "2px solid #111827",
                     fontSize: "6.5pt",
                     fontWeight: 700,
                     letterSpacing: "1.5px",
                     textTransform: "uppercase",
-                    color: "#888",
+                    color: "#71717a",
                   }}>
-                    <th style={{ padding: "8px 10px", textAlign: "left", width: "36px" }}>No</th>
-                    <th style={{ padding: "8px 10px", textAlign: "left" }}>Proyek</th>
-                    <th style={{ padding: "8px 10px", textAlign: "left" }}>Kategori</th>
-                    <th style={{ padding: "8px 10px", textAlign: "right", width: "120px" }}>Harga</th>
+                    <th style={{ padding: "8px 8px 8px 0", textAlign: "left" }}>No</th>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>Proyek</th>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>Kategori</th>
+                    <th style={{ padding: "8px 0 8px 8px", textAlign: "right" }}>Harga</th>
                   </tr>
                 </thead>
                 <tbody>
                   {projects.map((p, idx) => (
-                    <tr key={p.id} style={{
-                      borderBottom: "1px solid #f0f0f0",
-                      transition: "background 0.15s",
-                    }}>
-                      <td style={{ padding: "10px 10px", fontFamily: "'JetBrains Mono', monospace", color: "#aaa", fontSize: "8pt" }}>
+                    <tr key={p.id} style={{ borderBottom: "1px solid #f2f2f4" }}>
+                      <td style={{ padding: "10px 8px 10px 0", fontFamily: "'JetBrains Mono', monospace", color: "#a1a1aa", fontSize: "8pt", verticalAlign: "top" }}>
                         {String(idx + 1).padStart(2, "0")}
                       </td>
-                      <td style={{ padding: "10px 10px" }}>
-                        <div style={{ fontWeight: 600, fontSize: "9pt", color: "#1a1a2e", marginBottom: "1px" }}>{p.projectTitle}</div>
+                      <td style={{ padding: "10px 8px", verticalAlign: "top", overflowWrap: "anywhere" }}>
+                        <div style={{ fontWeight: 600, fontSize: "9pt", color: "#111827", marginBottom: "1px" }}>{p.projectTitle}</div>
                         {/* Dulu baris ini menampilkan nama klien. Sejak invoice dibuat
                             per klien, mengulang nama yang sama di setiap baris jadi
                             mubazir — diganti tanggal deadline proyek, pada slot dan
-                            gaya yang persis sama supaya tata letak lembar tidak berubah. */}
-                        <div style={{ fontSize: "7pt", color: "#bbb" }}>{formatDate(p.deadline)}</div>
+                            gaya yang sama sehingga tata letak lembar tidak bergeser. */}
+                        <div style={{ fontSize: "7pt", color: "#b4b4bb" }}>{formatDate(p.deadline)}</div>
                       </td>
-                      <td style={{ padding: "10px 10px", color: "#888", fontSize: "8pt" }}>{p.category.name}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: "8.5pt" }}>
+                      <td style={{ padding: "10px 8px", color: "#8b8b93", fontSize: "8pt", verticalAlign: "top", overflowWrap: "anywhere" }}>{p.category.name}</td>
+                      <td style={{ padding: "10px 0 10px 8px", textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: "8.5pt", color: "#111827", verticalAlign: "top", whiteSpace: "nowrap" }}>
                         {formatCurrency(p.price)}
                       </td>
                     </tr>
@@ -547,65 +731,78 @@ export default function InvoiceModal({
                 </tbody>
               </table>
 
-              {/* TOTALS */}
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "32px" }}>
-                <div style={{ width: "220px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: "8.5pt", color: "#888" }}>
+              <div style={{ flex: "1 1 auto", minHeight: 0 }} aria-hidden="true" />
+
+              {/* RINGKASAN TAGIHAN */}
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "28px" }}>
+                <div style={{ width: "240px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "4px 0", fontSize: "8.5pt", color: "#8b8b93" }}>
                     <span>Subtotal</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500 }}>{formatCurrency(subtotal)}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500, color: "#3f3f46", whiteSpace: "nowrap" }}>{formatCurrency(subtotal)}</span>
                   </div>
                   {taxPercent > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: "8.5pt", color: "#888" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "4px 0", fontSize: "8.5pt", color: "#8b8b93" }}>
                       <span>Pajak ({taxPercent}%)</span>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500, color: "#2e7d32" }}>+{formatCurrency(taxAmount)}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500, color: "#2e7d32", whiteSpace: "nowrap" }}>+{formatCurrency(taxAmount)}</span>
                     </div>
                   )}
                   {safeDiscount > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: "8.5pt", color: "#c62828" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "4px 0", fontSize: "8.5pt", color: "#c62828" }}>
                       <span>Diskon</span>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500 }}>-{formatCurrency(safeDiscount)}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 500, whiteSpace: "nowrap" }}>-{formatCurrency(safeDiscount)}</span>
                     </div>
                   )}
-                  <div style={{ borderTop: "2px solid #1a1a2e", margin: "6px 0 4px" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0 0", fontSize: "11pt", fontWeight: 800, color: "#1a1a2e" }}>
+                  <div style={{ borderTop: "2px solid #111827", margin: "7px 0 5px" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "5px 0 0", fontSize: "11pt", fontWeight: 800, color: "#111827" }}>
                     <span>Total Tagihan</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{formatCurrency(totalAmount)}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>{formatCurrency(totalAmount)}</span>
                   </div>
                 </div>
               </div>
 
-              {/* BANK INFO */}
+              {/* PENYERAP RUANG
+                  Ruang lebih dibagi ke DUA celah, bukan ditumpuk di satu
+                  tempat. Dengan begitu selisih tinggi kertas terbagi rata:
+                  satu jeda sebelum ringkasan tagihan dan satu jeda sebelum
+                  blok rekening. Untuk invoice 3 order hasilnya lembar yang
+                  terisi penuh tanpa lubang besar di satu titik; untuk invoice
+                  panjang kedua celah ini menyusut ke nol dengan sendirinya. */}
+              <div style={{ flex: "1 1 auto", minHeight: 0 }} aria-hidden="true" />
+
+              {/* REKENING PEMBAYARAN
+                  Tanpa ikon: informasi rekening sudah jelas dari labelnya,
+                  dan ikon hanya menambah elemen visual yang tidak memberi
+                  maklumat. Formatnya disusun sebagai label kecil di atas lalu
+                  baris "bank + nomor" dan "atas nama" yang dipisah dengan
+                  spasi konsisten, sehingga keterbacaannya lebih rapi. */}
               <div style={{
-                border: "1px solid #eee", background: "#fafafa",
-                borderRadius: "6px", padding: "12px 14px",
-                display: "flex", alignItems: "center", gap: "10px",
-                marginBottom: "24px",
+                border: "1px solid #ececef", background: "#fafafb",
+                borderRadius: "8px", padding: "13px 16px",
+                marginBottom: "22px",
               }}>
-                <div style={{
-                  width: "28px", height: "28px",
-                  background: "#1a1a2e", color: "#fff",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  borderRadius: "4px", fontSize: "12px",
-                }}>
-                  <Landmark className="w-3.5 h-3.5" style={{ width: "14px", height: "14px" }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: "6.5pt", fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#aaa", marginBottom: "2px" }}>Rekening</div>
-                  <div style={{ fontSize: "8.5pt", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#555" }}>
-                    BCA 872-0492-911 a.n. Design Studio
+                <div style={{ fontSize: "6.5pt", fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: "#a1a1aa", marginBottom: "7px" }}>Rekening</div>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: "16px", rowGap: "3px" }}>
+                  <div style={{ fontSize: "9pt", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#3f3f46" }}>
+                    {STUDIO.bank.name} {STUDIO.bank.account}
+                  </div>
+                  <div style={{ fontSize: "7.5pt", color: "#8b8b93" }}>
+                    a.n. <span style={{ fontWeight: 600, color: "#3f3f46" }}>{STUDIO.bank.holder}</span>
                   </div>
                 </div>
               </div>
 
-              {/* FOOTER NOTE */}
+              {/* CATATAN KAKI
+                  `marginTop: auto` menempelkannya ke margin bawah lembar —
+                  konsisten di semua ukuran invoice, dan mengisi ruang yang
+                  tadinya kosong dengan pemisah yang disengaja. */}
               <div style={{
                 textAlign: "center",
                 fontSize: "7.5pt",
-                color: "#bbb",
+                color: "#b4b4bb",
                 fontStyle: "italic",
-                borderTop: "1px solid #f0f0f0",
-                paddingTop: "16px",
-                marginTop: "8px",
+                borderTop: "1px solid #f2f2f4",
+                paddingTop: "12px",
+                marginTop: "auto",
               }}>
                 Terima kasih atas kerja samanya. Pembayaran paling lambat sesuai tanggal jatuh tempo.
               </div>
