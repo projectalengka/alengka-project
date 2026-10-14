@@ -314,9 +314,9 @@ export default function InvoiceModal({
             {/* Logo studio pada bilah alat. `alt` sengaja kosong: nama studio
                 sudah dibaca sebagai teks di sebelahnya, jadi membacakannya lagi
                 hanya menambah derau bagi pembaca layar. */}
-            {/* eslint-disable-next-line @next/next/no-img-element -- berkas SVG
-                statis di /public; optimasi next/image tidak berlaku untuk SVG
-                dan tidak diperlukan di sini. */}
+            {/* eslint-disable-next-line @next/next/no-img-element -- berkas
+                PNG statis di /public; optimasi next/image tidak diperlukan dan
+                akan menambah lapisan yang tak berguna untuk logo kecil. */}
             <img
               src={STUDIO.logo}
               alt=""
@@ -616,8 +616,10 @@ export default function InvoiceModal({
                     marginBottom: "13px",
                   }}>
                     {/* eslint-disable-next-line @next/next/no-img-element --
-                        SVG statis; sengaja NOT raster, supaya tepinya tetap
-                        tajam di PDF maupun saat dicetak. */}
+                        Logo PNG dari `public/` (artwork asli pemilik studio).
+                        Rasio 3,1789 : 1 dijaga dengan mematok tinggi lalu
+                        membiarkan lebar mengikuti `auto`, jadi bentuknya tidak
+                        pernah gepeng berapa pun lebar halamannya. */}
                     <img
                       ref={logoRef}
                       src={STUDIO.logo}

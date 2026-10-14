@@ -16,18 +16,25 @@ export const STUDIO = {
   /** Rekening pembayaran yang dicetak pada blok "Rekening". */
   bank: {
     name: "BCA",
-    account: "872-0492-911",
+    account: "2650529912",
     holder: "Muchammad Andi Setiyawan",
   },
   /**
-   * Logo ditulis sebagai teks (bukan SVG inline) supaya identitas ini tetap
+   * Logo ditulis sebagai teks (bukan gambar inline) supaya identitas ini tetap
    * dapat diserialisasi dan tidak menarik React ke dalam berkas konfigurasi.
-   * Berkas fisiknya ada di `public/alengka-logo.svg` (tinta gelap, untuk
-   * kertas putih) dan `public/alengka-logo-light.svg` (tinta putih, untuk
+   * Berkas fisiknya ada di `public/alengka-logo.png` (tinta gelap, untuk
+   * kertas putih) dan `public/alengka-logo-light.png` (tinta putih, untuk
    * permukaan gelap).
+   *
+   * PNG ini menggantikan pasangan SVG lama. Berkas SVG itu kehilangan
+   * `fill-rule="evenodd"`, sehingga seluruh counter huruf — misalnya lubang
+   * segitiga di dalam "A" — terisi tinta dan wordmark tampak sebagai bongkahan
+   * hitam, bukan huruf. PNG di sini berasal langsung dari artwork pemilik
+   * studio, jadi bentuknya pasti benar. Untuk mengganti logo, cukup timpa
+   * kedua berkas PNG ini (jaga latar transparan dan rasio 3,1789 : 1).
    */
-  logo: "/alengka-logo.svg",
-  logoLight: "/alengka-logo-light.svg",
-  /** Rasio lebar:tinggi asli artwork logo (31953.9 : 10051.88). */
-  logoAspect: 31953.9 / 10051.88,
+  logo: "/alengka-logo.png",
+  logoLight: "/alengka-logo-light.png",
+  /** Rasio lebar:tinggi artwork logo (8157 : 2566 = 3,1789 : 1). */
+  logoAspect: 8157 / 2566,
 } as const
