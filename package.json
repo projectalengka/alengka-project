@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "prisma migrate deploy && next build",
+    "vercel-build": "next build",
     "start": "next start",
     "lint": "next lint",
     "check": "tsc --noEmit",
@@ -13,6 +13,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:migrate:supabase": "node scripts/migrate-supabase.mjs",
     "db:status": "prisma migrate status",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
