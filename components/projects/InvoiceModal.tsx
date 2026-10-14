@@ -209,52 +209,64 @@ export default function InvoiceModal({
 
       /* Logo ditempel TERPISAH ke kanvas hasil tangkapan.
        *
-       * Sebabnya ditemukan dengan mengukur piksel, bukan membaca kode:
-       * html2canvas 1.4.1 memang menggambar <img> dengan benar saat elemen
-       * yang ditangkap kecil (diuji: 400x200 px) dan juga saat menangkap
-       * lembar setinggi 1500 px. Tetapi begitu yang ditangkap adalah lembar
-       * penuh berukuran A4 (210mm x 297mm) pada scale 2 (kanvas ~1588x2246),
-       * setiap isi <img> HILANG tanpa pesan apa pun — logo SVG, logo PNG,
-       * maupun data URL, semuanya menghasilkan nol piksel tinta. Jadi ini
-       * batas html2canvas, bukan kesalahan berkas logo: logo yang digambar
-       * sendiri ke kanvas selalu benar (diuji: 52.096 piksel tinta).
+       * Dua batas html2canvas 1.4.1, keduanya terbukti dengan mengukur piksel
+       * (bukan membaca kode):
        *
-       * Solusinya: logo digambar ulang ke kanvas yang sudah jadi, pada posisi
-       * yang diukur langsung dari DOM sehingga tidak mungkin meleset dari
-       * tempatnya di lembar. Kapsul pembungkusnya bukan gambar, jadi tetap
-       * ikut tertangkap html2canvas — hanya tinta logonya yang perlu ditempel.
+       * 1. Saat yang ditangkap adalah lembar penuh A4 (210mm x 297mm) pada
+       *    scale 2 (kanvas ~1588x2246), setiap isi <img> HILANG tanpa pesan —
+       *    logo SVG maupun PNG sama-sama menghasilkan nol piksel tinta. Karena
+       *    itu tinta logo harus ditempel ulang di sini. Kapsul pembungkusnya
+       *    bukan gambar, jadi tetap ikut tertangkap.
+       *
+       * 2. Kanvas YANG DIKEMBALIKAN html2canvas MENOLAK gambar baru. Memanggil
+       *    `ctx.drawImage(logo, ...)` pada kanvas itu selesai tanpa error,
+       *    tetapi menghasilkan NOL piksel — wilayah logo tetap kosong. Gambar
+       *    yang sama, pada koordinat yang sama, berhasil digambar ke kanvas
+       *    baru (terukur 4.188 px tinta) dan juga ke kanvas baru yang sudah
+       *    disalin isi tangkapan html2canvas (terukur 4.199 px). Jadi yang
+       *    bermasalah adalah kanvas html2canvas-nya, bukan berkas logonya.
+       *
+       * Perbaikannya: salin hasil tangkapan ke kanvas BARU lebih dulu, lalu
+       * tempel logo di kanvas baru itu — kanvas itulah yang dipakai untuk PDF.
+       * Posisi logo diukur langsung dari DOM sehingga tidak mungkin meleset
+       * dari tempatnya di lembar.
        */
       const logoEl = logoRef.current
+      let outputCanvas: HTMLCanvasElement = canvas
       if (logoEl && logoEl.complete && logoEl.naturalWidth > 0) {
         const sheetRect = element.getBoundingClientRect()
         const logoRect = logoEl.getBoundingClientRect()
         const ratio = canvas.width / sheetRect.width
 
-        /* `decode()` memastikan bitmap SVG sudah siap sebelum digambar.
+        /* `decode()` memastikan bitmap logo sudah siap sebelum digambar.
            Tanpa menunggunya, `drawImage` bisa menghasilkan bidang kosong pada
            peramban yang belum menyelesaikan dekode. Kalau API-nya tidak ada
            (atau decode gagal), elemen gambar yang sudah `complete` tetap
            dipakai — bukan kondisi gagal. */
-        const logoImage = logoEl
         try {
-          await logoImage.decode?.()
+          await logoEl.decode?.()
         } catch {
           /* Abaikan: `complete` + `naturalWidth > 0` sudah cukup untuk digambar. */
         }
 
-        const ctx = canvas.getContext("2d")
+        const composed = document.createElement("canvas")
+        composed.width = canvas.width
+        composed.height = canvas.height
+        const ctx = composed.getContext("2d")
         if (ctx) {
+          ctx.drawImage(canvas, 0, 0)
           ctx.drawImage(
-            logoImage,
+            logoEl,
             (logoRect.left - sheetRect.left) * ratio,
             (logoRect.top - sheetRect.top) * ratio,
             logoRect.width * ratio,
             logoRect.height * ratio,
           )
+          outputCanvas = composed
         }
       }
 
-      const imgData = canvas.toDataURL("image/png")
+      const imgData = outputCanvas.toDataURL("image/png")
 
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
       const pageWidth = 210
@@ -262,7 +274,7 @@ export default function InvoiceModal({
       const pageMargin = 10
       const imgWidth = pageWidth - pageMargin * 2
       // Tinggi gambar saat diskalakan ke lebar area cetak
-      const scaledHeight = (canvas.height * imgWidth) / canvas.width
+      const scaledHeight = (outputCanvas.height * imgWidth) / outputCanvas.width
 
       /* Pemotongan multi-halaman.
        *
