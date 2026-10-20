@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import type { KeyboardEvent } from "react"
 import type { Client, Project } from "@/types"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { STATUS_META } from "@/lib/status"
@@ -24,6 +25,10 @@ export default function InvoiceWorkspace({ clients, projects, onOpenInvoice }: I
   const [clientId, setClientId] = useState("")
   const [search, setSearch] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [clientQuery, setClientQuery] = useState("")
+  const [clientOpen, setClientOpen] = useState(false)
+  const [clientActive, setClientActive] = useState(0)
+  const clientBoxRef = useRef<HTMLDivElement>(null)
 
   const orderedClients = useMemo(() => [...clients].sort((a, b) => a.name.localeCompare(b.name, "id")), [clients])
   const selectedClient = orderedClients.find((client) => client.id === clientId) ?? null
@@ -33,6 +38,21 @@ export default function InvoiceWorkspace({ clients, projects, onOpenInvoice }: I
     const firstWithReadyProject = orderedClients.find((client) => projects.some((p) => p.clientId === client.id && p.status === "Done" && !p.invoicedAt))
     setClientId(firstWithReadyProject?.id ?? orderedClients[0]?.id ?? "")
   }, [clientId, orderedClients, projects])
+
+  const filteredClients = useMemo(() => {
+    const query = clientQuery.trim().toLocaleLowerCase("id-ID")
+    if (!query) return orderedClients
+    return orderedClients.filter((client) => `${client.name} ${client.contact}`.toLocaleLowerCase("id-ID").includes(query))
+  }, [orderedClients, clientQuery])
+
+  useEffect(() => {
+    if (!clientOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (!clientBoxRef.current?.contains(event.target as Node)) setClientOpen(false)
+    }
+    document.addEventListener("mousedown", onPointerDown)
+    return () => document.removeEventListener("mousedown", onPointerDown)
+  }, [clientOpen])
 
   const available = useMemo(() => {
     if (!clientId) return []
@@ -55,6 +75,32 @@ export default function InvoiceWorkspace({ clients, projects, onOpenInvoice }: I
 
   const changePool = (next: ProjectPool) => { setPool(next); setSelectedIds(new Set()); setSearch("") }
   const changeClient = (next: string) => { setClientId(next); setSelectedIds(new Set()) }
+  const openClientList = () => {
+    setClientOpen(true)
+    setClientQuery("")
+    setClientActive(Math.max(0, orderedClients.findIndex((client) => client.id === clientId)))
+  }
+  const pickClient = (id: string) => {
+    changeClient(id)
+    setClientOpen(false)
+  }
+  const onClientKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      if (!clientOpen) { openClientList(); return }
+      const step = event.key === "ArrowDown" ? 1 : -1
+      setClientActive((index) => (index + step + filteredClients.length) % Math.max(filteredClients.length, 1))
+    } else if (event.key === "Enter") {
+      if (clientOpen && filteredClients[clientActive]) {
+        event.preventDefault()
+        pickClient(filteredClients[clientActive].id)
+      } else if (!clientOpen) {
+        openClientList()
+      }
+    } else if (event.key === "Escape") {
+      if (clientOpen) { event.preventDefault(); setClientOpen(false); setClientQuery("") }
+    }
+  }
   const toggleProject = (id: string) => setSelectedIds((current) => {
     const next = new Set(current)
     if (next.has(id)) next.delete(id)
@@ -82,13 +128,59 @@ export default function InvoiceWorkspace({ clients, projects, onOpenInvoice }: I
           <h2 className="text-base font-semibold">Buat invoice</h2>
           <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Pilih klien dan satu atau beberapa proyek. Periksa pratinjau sebelum unduh.</p>
         </div>
-        <label className="w-full md:max-w-xs">
+        <div ref={clientBoxRef} className="relative w-full md:max-w-xs">
           <span className="mb-1.5 block text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">Klien</span>
-          <select value={clientId} onChange={(event) => changeClient(event.target.value)} className="min-h-11 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 text-sm outline-none focus:border-neutral-400 dark:border-neutral-800 dark:bg-neutral-900 dark:focus:border-neutral-600">
-            {orderedClients.length === 0 && <option value="">Belum ada klien</option>}
-            {orderedClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-          </select>
-        </label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+            <input
+              value={clientOpen ? clientQuery : selectedClient?.name ?? ""}
+              onChange={(event) => { setClientQuery(event.target.value); setClientActive(0); setClientOpen(true) }}
+              onFocus={openClientList}
+              onClick={openClientList}
+              onKeyDown={onClientKeyDown}
+              role="combobox"
+              aria-expanded={clientOpen}
+              aria-controls="client-options"
+              aria-autocomplete="list"
+              placeholder={orderedClients.length === 0 ? "Belum ada klien" : "Cari klien..."}
+              readOnly={orderedClients.length === 0}
+              className="min-h-11 w-full rounded-xl border border-neutral-200 bg-neutral-50 pl-9 pr-9 text-sm outline-none focus:border-neutral-400 dark:border-neutral-800 dark:bg-neutral-900 dark:focus:border-neutral-600"
+            />
+            {orderedClients.length > 0 && (
+              <ChevronDown className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400 transition-transform ${clientOpen ? "rotate-180" : ""}`} />
+            )}
+          </div>
+          {clientOpen && (
+            <ul id="client-options" role="listbox" className="absolute z-30 mt-1.5 max-h-64 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-800 dark:bg-[#151517]">
+              {filteredClients.length === 0 && (
+                <li className="px-3 py-3 text-center text-xs text-neutral-500 dark:text-neutral-400">
+                  {clientQuery.trim() ? `Klien "${clientQuery.trim()}" tidak ditemukan` : "Belum ada klien"}
+                </li>
+              )}
+              {filteredClients.map((client, index) => {
+                const active = index === clientActive
+                const selected = client.id === clientId
+                return (
+                  <li
+                    key={client.id}
+                    role="option"
+                    aria-selected={selected}
+                    onMouseEnter={() => setClientActive(index)}
+                    onClick={() => pickClient(client.id)}
+                    className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ${active ? "bg-neutral-100 dark:bg-neutral-800" : ""}`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{client.name}</span>
+                      {client.contact && <span className="mt-0.5 block truncate text-[10px] text-neutral-500 dark:text-neutral-400">{client.contact}</span>}
+                    </span>
+                    {client._count?.projects != null && <span className="shrink-0 text-[10px] text-neutral-400">{client._count.projects} proyek</span>}
+                    {selected && <Check className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
       </section>
 
       <section className="grid gap-2 sm:grid-cols-3">
